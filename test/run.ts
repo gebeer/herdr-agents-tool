@@ -1,0 +1,314 @@
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { verifyChildProfile } from "../src/child-profile.js";
+import { requirePaneCloseSuccess, runHerdr } from "../src/herdr-cli.js";
+import { selectModel, startHerdrPiAgent } from "../src/start.js";
+import type { SelectedProfile } from "../src/types.js";
+
+const root = mkdtempSync(join(tmpdir(), "herdr-agents-tool-test-"));
+const profile: SelectedProfile = {
+	model: "test/model",
+	thinking: "high",
+};
+
+const fakePiRuntime = join(root, "fake-pi-runtime.mjs");
+const fakeAiRuntime = join(root, "fake-pi-ai.mjs");
+
+writeFileSync(fakePiRuntime, `
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+const credentialFor = (agentDir) => JSON.parse(readFileSync(join(agentDir, "auth.json"), "utf8")).test;
+export const readStoredCredential = (_provider, authPath) => JSON.parse(readFileSync(authPath, "utf8")).test;
+export class SettingsManager {
+  static create(_cwd, _agentDir, options) {
+    if (options?.projectTrusted !== false) throw new Error("project trust was not disabled");
+    return {};
+  }
+}
+export async function createAgentSessionServices(options) {
+  const { agentDir, settingsManager, resourceLoaderOptions } = options;
+  if (!settingsManager || !resourceLoaderOptions?.noExtensions || !resourceLoaderOptions?.noSkills ||
+      !resourceLoaderOptions?.noPromptTemplates || !resourceLoaderOptions?.noThemes || !resourceLoaderOptions?.noContextFiles) {
+    throw new Error("untrusted project resources were not disabled");
+  }
+  const credential = credentialFor(agentDir);
+  const model = { provider: "test", id: "model", reasoning: true };
+  const modelRuntime = {
+    getError: () => undefined,
+    getModel: (provider, id) => provider === "test" && id === "model" ? model : undefined,
+    getAuth: async () => {
+      if (credential.type === "oauth") {
+        if (credential.expires < Date.now()) {
+          if (credential.refresh === "refresh-fails") throw new Error("refresh failed");
+          if (credential.refresh !== "refresh-ok") return undefined;
+          return { auth: { headers: { authorization: "Bearer refreshed" } }, source: "OAuth" };
+        }
+        return credential.access ? { auth: { headers: { authorization: "Bearer " + credential.access } }, source: "OAuth" } : undefined;
+      }
+      return credential.key ? { auth: { apiKey: credential.key } } : undefined;
+    },
+  };
+  return { modelRuntime };
+}
+export const resolveCliModel = ({ cliModel, modelRuntime }) => {
+  const [provider, ...id] = cliModel.split("/");
+  const model = modelRuntime.getModel(provider, id.join("/"));
+  return { model, warning: undefined, error: undefined };
+};
+`);
+writeFileSync(fakeAiRuntime, `export const getSupportedThinkingLevels = () => ["off", "minimal", "low", "medium", "high", "xhigh", "max"];\n`);
+
+function writeCredential(credential: unknown): void {
+	writeFileSync(join(root, "auth.json"), JSON.stringify({ test: credential }));
+}
+
+async function expectReject(work: () => Promise<unknown>, message: string): Promise<void> {
+	await assert.rejects(work, (error: unknown) => error instanceof Error && error.message.includes(message));
+}
+
+function modelAliasChecks(): void {
+	const aliases = [
+		["sol", "openai-codex", "gpt-5.6-sol"],
+		["terra", "openai-codex", "gpt-5.6-terra"],
+		["luna", "openai-codex", "gpt-5.6-luna"],
+	] as const;
+	const lookups: string[] = [];
+	const context = {
+		modelRegistry: {
+			find: (provider: string, id: string) => {
+				lookups.push(`${provider}/${id}`);
+				return aliases.some(([, expectedProvider, expectedId]) => provider === expectedProvider && id === expectedId)
+					? { provider, id }
+					: undefined;
+			},
+		},
+	} as never;
+	for (const [alias, provider, id] of aliases) {
+		const model = selectModel(context, alias);
+		assert.equal(model.provider, provider);
+		assert.equal(model.id, id);
+	}
+	assert.deepEqual(lookups, aliases.map(([, provider, id]) => `${provider}/${id}`));
+	assert.throws(() => selectModel(context, "unknown"), /exact provider\/model-id or sol, terra, luna/);
+}
+
+async function untrustedProjectCheck(): Promise<void> {
+	const project = join(root, "untrusted-project");
+	const marker = join(root, "untrusted-extension-ran");
+	mkdirSync(join(project, ".pi", "extensions"), { recursive: true });
+	writeFileSync(join(project, ".pi", "extensions", "marker.ts"), `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
+	await createAgentSessionServices({
+		cwd: project,
+		agentDir: root,
+		settingsManager: SettingsManager.create(project, root, { projectTrusted: false }),
+		resourceLoaderOptions: {
+			noExtensions: true,
+			noSkills: true,
+			noPromptTemplates: true,
+			noThemes: true,
+			noContextFiles: true,
+		},
+	});
+	assert.equal(existsSync(marker), false, "untrusted project extension must not execute during preflight");
+}
+
+async function commandAuthCheck(): Promise<void> {
+	const commandProfile = join(root, "command-auth-profile");
+	const marker = join(root, "command-auth-ran");
+	mkdirSync(commandProfile, { recursive: true });
+	writeFileSync(join(commandProfile, "auth.json"), JSON.stringify({ command: { type: "api_key", key: "stored-literal" } }));
+	writeFileSync(join(commandProfile, "models.json"), JSON.stringify({
+		providers: {
+			command: {
+				baseUrl: "http://127.0.0.1:1/v1",
+				api: "openai-completions",
+				headers: { Authorization: `!${process.execPath} -e 'require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")'` },
+				models: [{
+					id: "model", name: "Command model", reasoning: true, input: ["text"],
+					contextWindow: 1_024, maxTokens: 128, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				}],
+			},
+		},
+	}));
+	await expectReject(() => verifyChildProfile({
+		model: "command/model",
+		thinking: "high",
+	}, commandProfile, root, undefined), "must not use environment- or command-sourced provider/model configuration");
+	assert.equal(existsSync(marker), false, "command-backed model auth must not execute during preflight");
+}
+
+async function childProfileChecks(): Promise<void> {
+	writeCredential({ type: "oauth", access: "old", refresh: "refresh-ok", expires: Date.now() - 1 });
+	await verifyChildProfile(profile, root, root, undefined, {
+		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
+	});
+
+	writeCredential({ type: "oauth", access: "", refresh: "refresh-ok", expires: Date.now() + 60_000 });
+	await expectReject(() => verifyChildProfile(profile, root, root, undefined, {
+		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
+	}), "stored literal API key or OAuth credential");
+
+	writeCredential({ type: "oauth", access: "old", refresh: "refresh-fails", expires: Date.now() - 1 });
+	await expectReject(() => verifyChildProfile(profile, root, root, undefined, {
+		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
+	}), "refresh failed");
+
+	writeCredential({ type: "oauth", access: "valid", refresh: "refresh-unused", expires: Date.now() + 3_600_000 });
+	await verifyChildProfile(profile, root, root, undefined, {
+		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
+	});
+}
+
+async function herdrEnvelopeChecks(): Promise<void> {
+	let timeout: number | undefined;
+	const success = await runHerdr({
+		exec: async (_command, _args, options) => {
+			timeout = options?.timeout;
+			return { code: 0, killed: false, stderr: "", stdout: JSON.stringify({ id: "rpc-1", result: { type: "ok" } }) };
+		},
+	}, "/not-run", [], { cwd: root, timeout: 100, stage: "compensation" });
+	assert.equal(timeout, 100, "runner must receive the bounded deadline");
+	requirePaneCloseSuccess(success);
+	await expectReject(() => runHerdr({
+		exec: async () => ({ code: 0, killed: false, stderr: "", stdout: JSON.stringify({ result: { type: "ok" } }) }),
+	}, "/not-run", [], { cwd: root, timeout: 100, stage: "compensation" }), "malformed Herdr response envelope");
+	assert.throws(() => requirePaneCloseSuccess({ id: "rpc-2", result: { type: "pane_info" } }), /expected ok/);
+	await expectReject(() => runHerdr({
+		exec: async () => ({ code: 0, killed: false, stderr: "", stdout: "{}" }),
+	}, "/not-run", [], { cwd: root, timeout: 100, stage: "layout create" }), "malformed Herdr response envelope");
+}
+
+async function inputValidationChecks(): Promise<void> {
+	let calls = 0;
+	const pi = { exec: async () => { calls++; throw new Error("must not execute"); } };
+	const context = {} as never;
+	for (const input of [
+		{ name: "reviewer", placement: "unknown" },
+		{ name: "reviewer", placement: ["workspace"] },
+		{ name: "reviewer", direction: { value: "right" } },
+		{ name: "reviewer", thinking: "unbounded" },
+		{ name: "reviewer", placement: "workspace", injected: true },
+	]) {
+		await expectReject(() => startHerdrPiAgent(pi, input as never, undefined, context), "invalid");
+	}
+	assert.equal(calls, 0, "invalid input must fail before profile checks or layout mutation");
+}
+
+function herdrResponse(result: Record<string, unknown>): { code: number; killed: boolean; stderr: string; stdout: string } {
+	return { code: 0, killed: false, stderr: "", stdout: JSON.stringify({ id: "test-rpc", result }) };
+}
+
+async function placementAndCompensationChecks(): Promise<void> {
+	const selectProfile = async (): Promise<SelectedProfile> => profile;
+	for (const scenario of [
+		{
+			input: { name: "panecheck", placement: "pane" },
+			created: { type: "pane_info", pane: { pane_id: "w1:p2" } },
+			createArgs: ["pane", "split", "--current", "--direction", "right", "--cwd", root, "--no-focus"],
+			pane: "w1:p2",
+		},
+		{
+			input: { name: "tabcheck", placement: "tab", workspace: "w1" },
+			created: { type: "tab_created", tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p3" } },
+			createArgs: ["tab", "create", "--workspace", "w1", "--cwd", root, "--label", "tabcheck", "--no-focus"],
+			pane: "w1:p3",
+		},
+		{
+			input: { name: "workspacecheck", placement: "workspace" },
+			created: { type: "workspace_created", workspace: { workspace_id: "w2" }, tab: { tab_id: "w2:t1" }, root_pane: { pane_id: "w2:p1" } },
+			createArgs: ["workspace", "create", "--cwd", root, "--label", "workspacecheck", "--no-focus"],
+			pane: "w2:p1",
+		},
+	]) {
+		const calls: Array<{ args: string[]; timeout: number | undefined }> = [];
+		const pi = {
+			exec: async (_command: string, args: string[], options?: { timeout?: number }) => {
+				calls.push({ args, timeout: options?.timeout });
+				if (calls.length === 1) return herdrResponse(scenario.created);
+				return herdrResponse({
+					type: "agent_started",
+					agent: { name: scenario.input.name, pane_id: scenario.pane, agent: "pi", interactive_ready: true, launch_pending: false },
+					argv: ["pi", "--name", scenario.input.name, "--model", profile.model, "--thinking", profile.thinking],
+				});
+			},
+		};
+		const started = await startHerdrPiAgent(pi as never, scenario.input as never, undefined, { cwd: root } as never, { selectProfile });
+		assert.deepEqual(calls[0]?.args, scenario.createArgs);
+		assert.equal(calls[0]?.timeout, 10_000);
+		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
+		assert.equal(started.details.pane, scenario.pane);
+	}
+
+	const outer = new AbortController();
+	const calls: Array<{ args: string[]; signal?: AbortSignal }> = [];
+	const pi = {
+		exec: async (_command: string, args: string[], options?: { signal?: AbortSignal }) => {
+			calls.push({ args, signal: options?.signal });
+			if (calls.length === 1) return herdrResponse({
+				type: "workspace_created",
+				workspace: { workspace_id: "w9" }, tab: { tab_id: "w9:t1" }, root_pane: { pane_id: "w9:p1" },
+			});
+			if (calls.length === 2) {
+				outer.abort();
+				return { code: 1, killed: false, stderr: "", stdout: "" };
+			}
+			return herdrResponse({ type: "pane_info" });
+		},
+	};
+	await expectReject(() => startHerdrPiAgent(pi as never, { name: "cleanupcheck", placement: "workspace" } as never, outer.signal, { cwd: root } as never, { selectProfile }), "agent startup: aborted; compensation failed: compensation: malformed Herdr response: expected ok");
+	assert.deepEqual(calls[2]?.args, ["pane", "close", "w9:p1"]);
+	assert.notEqual(calls[2]?.signal, outer.signal, "compensation must not reuse the aborted caller signal");
+	assert.equal(calls[2]?.signal?.aborted, false, "compensation signal must start live");
+
+	const lateAbort = new AbortController();
+	const lateCalls: string[][] = [];
+	const latePi = {
+		exec: async (_command: string, args: string[]) => {
+			lateCalls.push(args);
+			if (lateCalls.length === 1) {
+				lateAbort.abort();
+				return {
+					...herdrResponse({
+						type: "workspace_created",
+						workspace: { workspace_id: "w8" }, tab: { tab_id: "w8:t1" }, root_pane: { pane_id: "w8:p1" },
+					}),
+					code: 1,
+					killed: true,
+				};
+			}
+			return herdrResponse({ type: "ok" });
+		},
+	};
+	await expectReject(() => startHerdrPiAgent(latePi as never, { name: "lateabort", placement: "workspace" } as never, lateAbort.signal, { cwd: root } as never, { selectProfile }), "layout create: aborted; compensation closed created pane");
+	assert.deepEqual(lateCalls, [
+		["workspace", "create", "--cwd", root, "--label", "lateabort", "--no-focus"],
+		["pane", "close", "w8:p1"],
+	]);
+
+	const uncertainCalls: string[][] = [];
+	const uncertainPi = {
+		exec: async (_command: string, args: string[]) => {
+			uncertainCalls.push(args);
+			return herdrResponse({ type: "workspace_created", workspace: { workspace_id: "w3" }, tab: { tab_id: "w3:t1" }, root_pane: {} });
+		},
+	};
+	await expectReject(() => startHerdrPiAgent(uncertainPi as never, { name: "uncertaincheck", placement: "workspace" } as never, undefined, { cwd: root } as never, { selectProfile }), "creation outcome is uncertain and no pane was closed");
+	assert.equal(uncertainCalls.length, 1, "uncertain ownership must not attempt cleanup");
+}
+
+try {
+	modelAliasChecks();
+	await untrustedProjectCheck();
+	await commandAuthCheck();
+	await childProfileChecks();
+	await herdrEnvelopeChecks();
+	await inputValidationChecks();
+	await placementAndCompensationChecks();
+	console.log("unit checks passed: child trust/auth, Herdr envelopes, placements, compensation, and runtime input validation");
+} finally {
+	rmSync(root, { recursive: true, force: true });
+}

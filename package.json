@@ -1,0 +1,25 @@
+{
+  "name": "herdr-agents-tool",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "One narrow Pi tool for starting a Pi agent in a newly created Herdr location.",
+  "keywords": ["pi-package", "herdr"],
+  "scripts": {
+    "test": "bun run test/run.ts",
+    "test:integration": "bun run test/integration.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.84.2 <0.85.0",
+    "@earendil-works/pi-coding-agent": ">=0.84.2 <0.85.0",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.8.3"
+  },
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
