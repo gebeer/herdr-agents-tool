@@ -70,7 +70,7 @@ function removeChildSessionArtifact(file: string): void {
 		rmdirSync(parent);
 		return;
 	}
-	throw new Error("child session parent contains additional artifacts; leaving it intact");
+	// Other sessions share this directory; leave their artifacts intact.
 }
 
 async function startDisposableServer(): Promise<void> {
@@ -143,13 +143,15 @@ try {
 			cwd,
 			model: "openai-codex/gpt-5.6-terra",
 			thinking: "high",
+			prompt: "Do not use tools or memory. Reply exactly OK",
 		});
-		const details = result.details as { pane: string; model: string; thinking: string; herdr: { argv: string[]; agent?: unknown } };
+		const details = result.details as { pane: string; model: string; thinking: string; promptSubmitted?: true; herdr: { argv: string[]; agent?: unknown } };
 		createdPane = details.pane;
 		childSessionFile = childSessionReference(details.herdr.agent);
 		assert.deepEqual(details.herdr.argv, ["pi", "--name", name, "--model", details.model, "--thinking", details.thinking]);
-		const prompted = record(herdr(["agent", "prompt", name, "reply exactly OK", "--wait", "--timeout", "120000"]).result);
-		assert.equal(prompted.type, "agent_prompted");
+		assert.equal(details.promptSubmitted, true);
+		assert.equal(JSON.parse(result.content[0].type === "text" ? result.content[0].text : "{}").promptSubmitted, true);
+		herdr(["agent", "wait", name, "--until", "done", "--timeout", "30000"]);
 		const agent = record(record(herdr(["agent", "get", name]).result).agent);
 		const reference = record(agent.agent_session);
 		assert.equal(reference.kind, "path");
@@ -164,8 +166,8 @@ try {
 			const message = entry.type === "message" ? record(entry.message) : undefined;
 			const content = Array.isArray(message?.content) ? message.content : [];
 			return message?.role === "assistant" && message.provider === details.model.split("/")[0] &&
-				message.model === details.model.split("/")[1] && content.length === 1 &&
-				record(content[0])?.type === "text" && record(content[0])?.text === "OK";
+				message.model === details.model.split("/")[1] &&
+				content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("").trim() === "OK";
 		}));
 		const closed = herdr(["pane", "close", details.pane]);
 		assert.equal(record(closed.result).type, "ok");

@@ -17,6 +17,7 @@ export interface HerdrStartAgentInput {
 	cwd?: string;
 	model?: string;
 	thinking?: RequestedThinking;
+	prompt?: string;
 }
 
 export interface SelectedProfile {
@@ -38,6 +39,7 @@ export interface StartResultDetails {
 	model: string;
 	thinking: ThinkingLevel | "off";
 	herdr: unknown;
+	promptSubmitted?: true;
 }
 
 export class StartAgentError extends Error {

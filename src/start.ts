@@ -22,6 +22,7 @@ import {
 const NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 const CREATE_TIMEOUT_MS = 10_000;
 const START_TIMEOUT_MS = 35_000;
+const PROMPT_TIMEOUT_MS = 10_000;
 const HERDR_READY_TIMEOUT_MS = 30_000;
 const COMPENSATION_TIMEOUT_MS = 5_000;
 const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -41,6 +42,7 @@ type ValidatedInput = {
 	cwd?: string;
 	model?: string;
 	thinking?: RequestedThinking;
+	prompt?: string;
 };
 
 function record(value: unknown): JsonRecord | undefined {
@@ -133,7 +135,7 @@ function selectThinking(model: Model<any>, inherited: RequestedThinking | undefi
 function validateInput(input: unknown): ValidatedInput {
 	const source = record(input);
 	if (!source) throw new StartAgentError("validation", "invalid input: expected an object");
-	const allowed = new Set(["name", "placement", "workspace", "direction", "cwd", "model", "thinking"]);
+	const allowed = new Set(["name", "placement", "workspace", "direction", "cwd", "model", "thinking", "prompt"]);
 	for (const key of Object.keys(source)) {
 		if (!allowed.has(key)) throw new StartAgentError("validation", `invalid input field: ${key}`);
 	}
@@ -141,7 +143,7 @@ function validateInput(input: unknown): ValidatedInput {
 	if (typeof name !== "string" || !NAME_PATTERN.test(name)) {
 		throw new StartAgentError("validation", "invalid name: use [a-z][a-z0-9_-]{0,31}");
 	}
-	const optionalString = (key: "workspace" | "cwd" | "model"): string | undefined => {
+	const optionalString = (key: "workspace" | "cwd" | "model" | "prompt"): string | undefined => {
 		const value = source[key];
 		if (value === undefined) return undefined;
 		if (typeof value !== "string") throw new StartAgentError("validation", `invalid ${key}: expected a string`);
@@ -160,6 +162,10 @@ function validateInput(input: unknown): ValidatedInput {
 	if (rawThinking !== undefined && (typeof rawThinking !== "string" || !THINKING_LEVELS.includes(rawThinking as RequestedThinking))) {
 		throw new StartAgentError("validation", "invalid thinking level");
 	}
+	const prompt = optionalString("prompt");
+	if (prompt !== undefined && (!prompt.trim() || prompt.includes("\0"))) {
+		throw new StartAgentError("validation", "invalid prompt: expected nonblank text without NUL bytes");
+	}
 	const workspace = optionalString("workspace");
 	const direction = rawDirection as Direction | undefined;
 	if (workspace !== undefined && placement !== "tab") throw new StartAgentError("validation", "invalid field combination: workspace applies only to tab placement");
@@ -170,6 +176,7 @@ function validateInput(input: unknown): ValidatedInput {
 		cwd: optionalString("cwd"),
 		model: optionalString("model"),
 		thinking: rawThinking as RequestedThinking | undefined,
+		prompt,
 	};
 	switch (placement) {
 		case "pane": return { ...common, direction: direction ?? "right" };
@@ -342,25 +349,47 @@ export async function startHerdrPiAgent(
 		throw combinedFailure(failure, cleanupFailure);
 	}
 
+	let started;
 	try {
-		const started = await runHerdr(pi, binary, [
+		started = await runHerdr(pi, binary, [
 			"agent", "start", request.name, "--kind", "pi", "--pane", owned.paneId,
 			"--timeout", String(HERDR_READY_TIMEOUT_MS), "--", ...expectedPiArgv(request.name, profile),
 		], { cwd, signal, timeout: START_TIMEOUT_MS, stage: "agent startup" });
 		validateAgentStarted(started.result, request.name, owned.paneId, profile);
-		const details: StartResultDetails = {
-			name: request.name,
-			pane: owned.paneId,
-			...(owned.tabId ? { tab: owned.tabId } : {}),
-			...(owned.workspaceId ? { workspace: owned.workspaceId } : {}),
-			model: profile.model,
-			thinking: profile.thinking,
-			herdr: started.result,
-		};
-		return { text: JSON.stringify({ name: request.name, pane: owned.paneId }), details };
 	} catch (error) {
 		const primary = error instanceof Error ? error : new Error("agent startup failed");
 		const cleanupFailure = await compensate(pi, binary, owned.paneId, cwd);
 		throw combinedFailure(primary, cleanupFailure);
 	}
+
+	// Once ready, never roll back or retry: a failed prompt acknowledgement may hide delivered work.
+	if (request.prompt !== undefined) {
+		try {
+			signal?.throwIfAborted();
+			const prompted = await runHerdr(pi, binary, ["agent", "prompt", request.name, request.prompt], {
+				cwd, signal, timeout: PROMPT_TIMEOUT_MS, stage: "prompt submission",
+			});
+			const agent = record(prompted.result.agent);
+			if (prompted.result.type !== "agent_prompted" || agent?.name !== request.name ||
+				agent.pane_id !== owned.paneId || agent.agent !== "pi") {
+				throw new Error("malformed or mismatched agent_prompted response");
+			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : "prompt submission failed";
+			throw new Error(`${message}; agent ${request.name} in pane ${owned.paneId} left running; prompt delivery may be uncertain; inspect before retrying`);
+		}
+	}
+
+	const submission = request.prompt !== undefined ? { promptSubmitted: true as const } : {};
+	const details: StartResultDetails = {
+		name: request.name,
+		pane: owned.paneId,
+		...(owned.tabId ? { tab: owned.tabId } : {}),
+		...(owned.workspaceId ? { workspace: owned.workspaceId } : {}),
+		model: profile.model,
+		thinking: profile.thinking,
+		herdr: started.result,
+		...submission,
+	};
+	return { text: JSON.stringify({ name: request.name, pane: owned.paneId, ...submission }), details };
 }

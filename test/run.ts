@@ -187,6 +187,7 @@ async function inputValidationChecks(): Promise<void> {
 	const pi = { exec: async () => { calls++; throw new Error("must not execute"); } };
 	const context = {} as never;
 	for (const input of [
+		...["", " \n\t", "hello\0world", 123, null].map((prompt) => ({ name: "reviewer", prompt })),
 		{ name: "reviewer", placement: "unknown" },
 		{ name: "reviewer", placement: ["workspace"] },
 		{ name: "reviewer", direction: { value: "right" } },
@@ -241,6 +242,9 @@ async function placementAndCompensationChecks(): Promise<void> {
 		assert.equal(calls[0]?.timeout, 10_000);
 		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
 		assert.equal(started.details.pane, scenario.pane);
+		assert.equal(calls.length, 2, "omitted prompt must not submit anything");
+		assert.equal("promptSubmitted" in started.details, false);
+		assert.deepEqual(JSON.parse(started.text), { name: scenario.input.name, pane: scenario.pane });
 	}
 
 	const outer = new AbortController();
@@ -300,6 +304,57 @@ async function placementAndCompensationChecks(): Promise<void> {
 	assert.equal(uncertainCalls.length, 1, "uncertain ownership must not attempt cleanup");
 }
 
+async function promptChecks(): Promise<void> {
+	const prompt = '  Review "this"; $(not-a-shell)\n日本語\n  ';
+	for (const scenario of ["success", "not-ready", "wrong-type", "wrong-name", "wrong-pane", "wrong-kind", "timeout", "abort", "transport", "rejected"]) {
+		const calls: string[][] = [];
+		const controller = new AbortController();
+		const agent = { name: "promptcheck", pane_id: "w1:p2", agent: "pi", interactive_ready: true };
+		const pi = {
+			exec: async (_command: string, args: string[], options?: { timeout?: number; signal?: AbortSignal }) => {
+				calls.push(args);
+				if (args[1] === "split") return herdrResponse({ type: "pane_info", pane: { pane_id: agent.pane_id } });
+				if (args[1] === "start") return herdrResponse({
+					type: "agent_started",
+					agent: { ...agent, interactive_ready: scenario !== "not-ready" },
+					argv: ["pi", "--name", agent.name, "--model", profile.model, "--thinking", profile.thinking],
+				});
+				if (args[1] === "close") return herdrResponse({ type: "ok" });
+				assert.deepEqual(args, ["agent", "prompt", agent.name, prompt]);
+				assert.equal(options?.timeout, 10_000);
+				assert.equal(options?.signal, controller.signal);
+				if (scenario === "transport") throw new Error("transport failed");
+				if (scenario === "abort") controller.abort();
+				if (scenario === "rejected") return { ...herdrResponse({}), code: 1, stdout: '{"error":{"code":"agent_blocked"}}' };
+				return {
+					...herdrResponse({
+						type: scenario === "wrong-type" ? "ok" : "agent_prompted",
+						agent: { ...agent,
+							...(scenario === "wrong-name" ? { name: "other" } : {}),
+							...(scenario === "wrong-pane" ? { pane_id: "w1:p9" } : {}),
+							...(scenario === "wrong-kind" ? { agent: "claude" } : {}),
+						},
+					}),
+					killed: scenario === "timeout",
+				};
+			},
+		};
+		const run = () => startHerdrPiAgent(pi, { name: agent.name, prompt }, controller.signal, { cwd: root } as never, { selectProfile: async () => profile });
+		if (scenario === "success") {
+			const result = await run();
+			assert.equal(result.details.promptSubmitted, true);
+			assert.deepEqual(JSON.parse(result.text), { name: agent.name, pane: agent.pane_id, promptSubmitted: true });
+		} else if (scenario === "not-ready") {
+			await expectReject(run, "agent_not_ready");
+			assert.deepEqual(calls[2], ["pane", "close", agent.pane_id]);
+		} else {
+			await expectReject(run, `agent ${agent.name} in pane ${agent.pane_id} left running; prompt delivery may be uncertain`);
+			assert.equal(calls.some((args) => args[1] === "close"), false, scenario);
+		}
+		assert.equal(calls.filter((args) => args[1] === "prompt").length, scenario === "not-ready" ? 0 : 1, scenario);
+	}
+}
+
 try {
 	modelAliasChecks();
 	await untrustedProjectCheck();
@@ -308,6 +363,7 @@ try {
 	await herdrEnvelopeChecks();
 	await inputValidationChecks();
 	await placementAndCompensationChecks();
+	await promptChecks();
 	console.log("unit checks passed: child trust/auth, Herdr envelopes, placements, compensation, and runtime input validation");
 } finally {
 	rmSync(root, { recursive: true, force: true });

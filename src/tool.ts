@@ -7,6 +7,7 @@ import { DIRECTIONS, PLACEMENTS, THINKING_LEVELS, TOOL_NAME, type HerdrStartAgen
 const schema = Type.Object(
 	{
 		name: Type.String({ description: "Lowercase Herdr agent name." }),
+		prompt: Type.Optional(Type.String({ description: "Initial prompt submitted once after readiness; does not wait for completion." })),
 		placement: Type.Optional(StringEnum(PLACEMENTS, { description: "New pane, tab, or workspace." })),
 		workspace: Type.Optional(Type.String({ description: "Workspace ID for tab placement." })),
 		direction: Type.Optional(StringEnum(DIRECTIONS, { description: "Pane split direction." })),
@@ -23,7 +24,7 @@ export function registerHerdrStartAgentTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: TOOL_NAME,
 		label: "Start Herdr Agent",
-		description: "Start one Pi agent in a new Herdr pane, tab, or workspace.",
+		description: "Start one Pi agent in a new Herdr pane, tab, or workspace, optionally with an initial prompt.",
 		parameters: schema,
 		async execute(_toolCallId, input: ToolInput, signal, _onUpdate, ctx) {
 			const started = await startHerdrPiAgent(pi, input as HerdrStartAgentInput, signal, ctx);
