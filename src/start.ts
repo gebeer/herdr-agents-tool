@@ -154,7 +154,7 @@ function validateInput(input: unknown): ValidatedInput {
 	if (rawPlacement !== undefined && (typeof rawPlacement !== "string" || !PLACEMENTS.includes(rawPlacement as Placement))) {
 		throw new StartAgentError("validation", "invalid placement");
 	}
-	const placement = (rawPlacement ?? "pane") as Placement;
+	const placement = (rawPlacement ?? "tab") as Placement;
 	const rawDirection = source.direction;
 	if (rawDirection !== undefined && (typeof rawDirection !== "string" || !DIRECTIONS.includes(rawDirection as Direction))) {
 		throw new StartAgentError("validation", "invalid direction");
@@ -338,7 +338,10 @@ export async function startHerdrPiAgent(
 	let owned: OwnedLocation | undefined;
 
 	try {
-		const created = await runHerdr(pi, binary, createArgs(request.placement, request.name, cwd, request.direction, request.workspace), {
+		const created = await runHerdr(pi, binary, [
+			...createArgs(request.placement, request.name, cwd, request.direction, request.workspace),
+			"--env", `PI_CODING_AGENT_DIR=${DEFAULT_AGENT_DIR}`,
+		], {
 			cwd,
 			signal,
 			timeout: CREATE_TIMEOUT_MS,

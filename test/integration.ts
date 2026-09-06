@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmdirSync, unlinkSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, rmdirSync, unlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import {
 	createAgentSession,
@@ -22,6 +22,7 @@ if (process.env.HERDR_ENV !== "1") throw new Error("integration requires a Herdr
 const agentDir = join(homedir(), ".pi", "agent");
 
 const cwd = process.cwd();
+const inheritedProfile = mkdtempSync(join(tmpdir(), "herdr-nondefault-profile-"));
 const session = `herdr-agents-tool-${randomUUID().slice(0, 8)}`;
 const name = `check_${randomUUID().slice(0, 8)}`;
 const socketPath = join(process.env.HOME ?? "/tmp", ".config", "herdr", "sessions", session, "herdr.sock");
@@ -75,7 +76,7 @@ function removeChildSessionArtifact(file: string): void {
 }
 
 async function startDisposableServer(): Promise<void> {
-	const serverEnv = { ...process.env };
+	const serverEnv: NodeJS.ProcessEnv = { ...process.env, PI_CODING_AGENT_DIR: inheritedProfile };
 	delete serverEnv.PI_SESSION_FILE;
 	delete serverEnv.PI_SESSION_ID;
 	const server = spawn("herdr", ["--session", session, "server"], { cwd, env: serverEnv, detached: true, stdio: "ignore", shell: false });
@@ -101,7 +102,7 @@ try {
 	const previousSocket = process.env.HERDR_SOCKET_PATH;
 	const previousPane = process.env.HERDR_PANE_ID;
 	process.env.HERDR_SOCKET_PATH = socketPath;
-	const parentLocation = record(herdr(["workspace", "create", "--cwd", cwd, "--no-focus"]).result);
+	const parentLocation = record(herdr(["workspace", "create", "--cwd", cwd, "--no-focus", "--env", `PI_CODING_AGENT_DIR=${agentDir}`]).result);
 	const parentPane = String(record(parentLocation.root_pane).pane_id);
 	const parent = record(herdr(["agent", "start", `${name}_parent`, "--kind", "pi", "--pane", parentPane,
 		"--", "--name", `${name}_parent`, "--model", "openai-codex/gpt-5.6-sol", "--thinking", "minimal",
@@ -170,6 +171,8 @@ try {
 		assert.equal(typeof reference.value, "string");
 		childSessionFile = childSessionReference(agent);
 		assert.ok(childSessionFile, "Herdr must report the child session reference");
+		assert.ok(childSessionFile.startsWith(`${join(agentDir, "sessions")}${sep}`), "child must use the default profile, not the server's inherited profile");
+		assert.equal(agent.cwd, cwd, "profile pinning must preserve the requested working directory");
 		const entries = await readChildSession(childSessionFile);
 		assert.ok(entries.some((entry) => entry.type === "model_change" && entry.provider === details.model.split("/")[0] && entry.modelId === details.model.split("/")[1]));
 		assert.ok(entries.some((entry) => entry.type === "thinking_level_change" && entry.thinkingLevel === details.thinking));
@@ -256,6 +259,7 @@ try {
 			cleanupErrors.push(error instanceof Error ? error.message : "disposable Herdr session delete failed");
 		}
 	}
+	if (stopped) rmSync(inheritedProfile, { recursive: true, force: true });
 	if (cleanupErrors.length > 0) {
 		const message = `disposable integration cleanup incomplete for ${session}: ${cleanupErrors.join("; ")}`;
 		if (primaryError) console.error(message);

@@ -28,8 +28,7 @@ The package registers nothing unless `HERDR_ENV=1`, `HERDR_PANE_ID`, and `HERDR_
 ```ts
 herdr_start_agent({
   name: "reviewer",
-  placement: "pane", // pane | tab | workspace
-  direction: "right", // pane only
+  placement: "tab", // default; pane | tab | workspace
   cwd: "/work/project",
   model: "terra", // or exact canonical provider/model-id
   thinking: "high",
@@ -37,7 +36,9 @@ herdr_start_agent({
 })
 ```
 
-`name` must match `[a-z][a-z0-9_-]{0,31}`. `sol`, `terra`, and `luna` expand only to `openai-codex/gpt-5.6-sol`, `openai-codex/gpt-5.6-terra`, and `openai-codex/gpt-5.6-luna`; every other supplied model must be an exact registered `provider/model-id`. Expansion happens before registry lookup, child-profile preflight, and Herdr launch, which use the canonical model. Omitted model and thinking inherit the controller only when both can be validated exactly. Child agents use Pi's default `~/.pi/agent` profile.
+Placement defaults to a new tab in the orchestrator's workspace. Use `placement: "pane"` only when the user explicitly requests a split pane; `direction` then defaults to `"right"`.
+
+`name` must match `[a-z][a-z0-9_-]{0,31}`. `sol`, `terra`, and `luna` expand only to `openai-codex/gpt-5.6-sol`, `openai-codex/gpt-5.6-terra`, and `openai-codex/gpt-5.6-luna`; every other supplied model must be an exact registered `provider/model-id`. Expansion happens before registry lookup, child-profile preflight, and Herdr launch, which use the canonical model. Omitted model and thinking inherit the controller only when both can be validated exactly. Every new pane explicitly sets `PI_CODING_AGENT_DIR=$HOME/.pi/agent` through Herdr's `--env`, so child agents use the default Pi profile even when the orchestrator or Herdr server uses another profile (such as `pi-clawa`). This does not change the requested working directory or model/thinking inheritance.
 
 `prompt`, when supplied, must be nonblank text without NUL bytes; whitespace is preserved. After Herdr confirms interactive readiness, the tool submits it once with a ten-second deadline and returns `promptSubmitted: true` in the text result and details. This acknowledges submission, not completion. Omitting the prompt starts an idle agent and leaves the compact result unchanged.
 
@@ -67,4 +68,4 @@ bun run test
 RUN_HERDR_INTEGRATION=1 bun run test:integration
 ```
 
-The unit contracts use only Bun/Node primitives. The opt-in integration command creates a named disposable Herdr server, loads this package through Pi's SDK resource loader, executes the assembled tool with an initial prompt, and waits separately for its `OK` provider response. It reads the child session reference reported by Herdr to verify the persisted effective model/thinking entries and exact response, verifies that a real parent Pi receives the automatic completion report, then checks cleanup of its panes, generated session files, and named Herdr session metadata.
+The unit contracts use only Bun/Node primitives. The opt-in integration command creates a named disposable Herdr server with a non-default inherited Pi profile, verifies that the child still uses the default profile without changing cwd, loads this package through Pi's SDK resource loader, executes the assembled tool with an initial prompt, and waits separately for its `OK` provider response. It reads the child session reference reported by Herdr to verify the persisted effective model/thinking entries and exact response, verifies that a real parent Pi receives the automatic completion report, then checks cleanup of its panes, generated session files, and named Herdr session metadata.

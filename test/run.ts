@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -216,7 +216,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			pane: "w1:p2",
 		},
 		{
-			input: { name: "tabcheck", placement: "tab", workspace: "w1" },
+			input: { name: "tabcheck", workspace: "w1" },
 			created: { type: "tab_created", tab: { tab_id: "w1:t2" }, root_pane: { pane_id: "w1:p3" } },
 			createArgs: ["tab", "create", "--workspace", "w1", "--cwd", root, "--label", "tabcheck", "--no-focus"],
 			pane: "w1:p3",
@@ -241,7 +241,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			},
 		};
 		const started = await startHerdrPiAgent(pi as never, scenario.input as never, undefined, { cwd: root } as never, { selectProfile });
-		assert.deepEqual(calls[0]?.args, scenario.createArgs);
+		assert.deepEqual(calls[0]?.args, [...scenario.createArgs, "--env", `PI_CODING_AGENT_DIR=${join(homedir(), ".pi", "agent")}`]);
 		assert.equal(calls[0]?.timeout, 10_000);
 		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
 		const launchArgs = calls[1]!.args;
@@ -296,7 +296,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 	};
 	await expectReject(() => startHerdrPiAgent(latePi as never, { name: "lateabort", placement: "workspace" } as never, lateAbort.signal, { cwd: root } as never, { selectProfile }), "layout create: aborted; compensation closed created pane");
 	assert.deepEqual(lateCalls, [
-		["workspace", "create", "--cwd", root, "--label", "lateabort", "--no-focus"],
+		["workspace", "create", "--cwd", root, "--label", "lateabort", "--no-focus", "--env", `PI_CODING_AGENT_DIR=${join(homedir(), ".pi", "agent")}`],
 		["pane", "close", "w8:p1"],
 	]);
 
@@ -346,7 +346,7 @@ async function promptChecks(): Promise<void> {
 				};
 			},
 		};
-		const run = () => startHerdrPiAgent(pi, { name: agent.name, prompt }, controller.signal, { cwd: root } as never, { selectProfile: async () => profile });
+		const run = () => startHerdrPiAgent(pi, { name: agent.name, placement: "pane", prompt }, controller.signal, { cwd: root } as never, { selectProfile: async () => profile });
 		if (scenario === "success") {
 			const result = await run();
 			assert.equal(result.details.promptSubmitted, true);
