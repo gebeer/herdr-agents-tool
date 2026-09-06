@@ -1,6 +1,7 @@
 import { realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { verifyChildProfile } from "./child-profile.js";
@@ -266,15 +267,20 @@ function createArgs(
 	}
 }
 
-function expectedPiArgv(name: string, profile: SelectedProfile): string[] {
-	return ["--name", name, "--model", profile.model, "--thinking", profile.thinking];
+function expectedPiArgv(name: string, profile: SelectedProfile, parentPane: string): string[] {
+	return [
+		"--name", name, "--model", profile.model, "--thinking", profile.thinking,
+		"--extension", fileURLToPath(new URL("./child-notify.ts", import.meta.url)),
+		"--herdr-parent-pane", parentPane,
+		"--append-system-prompt", `You are a subagent. Do not spawn additional subagents. Your orchestrator is in Herdr pane ${parentPane}. Automatic completion reporting is installed; do not send a separate completion notification.`,
+	];
 }
 
 function sameArgv(actual: unknown, expected: string[]): boolean {
 	return Array.isArray(actual) && actual.length === expected.length && actual.every((item, index) => item === expected[index]);
 }
 
-function validateAgentStarted(result: JsonRecord, name: string, paneId: string, profile: SelectedProfile): void {
+function validateAgentStarted(result: JsonRecord, name: string, paneId: string, argv: string[]): void {
 	if (result.type !== "agent_started") throw new StartAgentError("startup", "malformed start response: expected agent_started", paneId);
 	const agent = record(result.agent);
 	if (!agent) throw new StartAgentError("startup", "malformed start response: missing agent", paneId);
@@ -284,7 +290,7 @@ function validateAgentStarted(result: JsonRecord, name: string, paneId: string, 
 	if (agent.interactive_ready !== true || agent.launch_pending === true) {
 		throw new StartAgentError("startup", "agent_not_ready", paneId);
 	}
-	if (!sameArgv(result.argv, ["pi", ...expectedPiArgv(name, profile)])) {
+	if (!sameArgv(result.argv, ["pi", ...argv])) {
 		throw new StartAgentError("startup", "mismatched start response: argv", paneId);
 	}
 }
@@ -323,9 +329,12 @@ export async function startHerdrPiAgent(
 	dependencies: StartHerdrPiAgentDependencies = {},
 ): Promise<{ text: string; details: StartResultDetails }> {
 	const request = validateInput(input);
+	const parentPane = id(process.env.HERDR_PANE_ID);
+	if (!parentPane) throw new StartAgentError("validation", "invalid Herdr context: orchestrator pane is unavailable");
 	const cwd = normalizeCwd(ctx.cwd, request.cwd);
 	const profile = await (dependencies.selectProfile ?? selectProfile)(ctx, request.model, request.thinking, cwd, signal);
 	const binary = resolveHerdrBinary();
+	const argv = expectedPiArgv(request.name, profile, parentPane);
 	let owned: OwnedLocation | undefined;
 
 	try {
@@ -353,9 +362,9 @@ export async function startHerdrPiAgent(
 	try {
 		started = await runHerdr(pi, binary, [
 			"agent", "start", request.name, "--kind", "pi", "--pane", owned.paneId,
-			"--timeout", String(HERDR_READY_TIMEOUT_MS), "--", ...expectedPiArgv(request.name, profile),
+			"--timeout", String(HERDR_READY_TIMEOUT_MS), "--", ...argv,
 		], { cwd, signal, timeout: START_TIMEOUT_MS, stage: "agent startup" });
-		validateAgentStarted(started.result, request.name, owned.paneId, profile);
+		validateAgentStarted(started.result, request.name, owned.paneId, argv);
 	} catch (error) {
 		const primary = error instanceof Error ? error : new Error("agent startup failed");
 		const cleanupFailure = await compensate(pi, binary, owned.paneId, cwd);

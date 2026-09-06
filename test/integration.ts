@@ -27,6 +27,7 @@ const name = `check_${randomUUID().slice(0, 8)}`;
 const socketPath = join(process.env.HOME ?? "/tmp", ".config", "herdr", "sessions", session, "herdr.sock");
 let createdPane: string | undefined;
 let childSessionFile: string | undefined;
+let parentSessionFile: string | undefined;
 let primaryError: unknown;
 
 function herdr(args: string[]): Record<string, unknown> {
@@ -98,7 +99,16 @@ async function readChildSession(file: string): Promise<Record<string, unknown>[]
 try {
 	await startDisposableServer();
 	const previousSocket = process.env.HERDR_SOCKET_PATH;
+	const previousPane = process.env.HERDR_PANE_ID;
 	process.env.HERDR_SOCKET_PATH = socketPath;
+	const parentLocation = record(herdr(["workspace", "create", "--cwd", cwd, "--no-focus"]).result);
+	const parentPane = String(record(parentLocation.root_pane).pane_id);
+	const parent = record(herdr(["agent", "start", `${name}_parent`, "--kind", "pi", "--pane", parentPane,
+		"--", "--name", `${name}_parent`, "--model", "openai-codex/gpt-5.6-sol", "--thinking", "minimal",
+		"--append-system-prompt", "You are a test report receiver. Do not use tools or memory. Reply exactly ACK to reports.",
+	]).result);
+	parentSessionFile = childSessionReference(parent.agent);
+	process.env.HERDR_PANE_ID = parentPane;
 	let sdkSession: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
 	try {
 		const runtime = await ModelRuntime.create({
@@ -148,7 +158,8 @@ try {
 		const details = result.details as { pane: string; model: string; thinking: string; promptSubmitted?: true; herdr: { argv: string[]; agent?: unknown } };
 		createdPane = details.pane;
 		childSessionFile = childSessionReference(details.herdr.agent);
-		assert.deepEqual(details.herdr.argv, ["pi", "--name", name, "--model", details.model, "--thinking", details.thinking]);
+		assert.deepEqual(details.herdr.argv.slice(0, 7), ["pi", "--name", name, "--model", details.model, "--thinking", details.thinking]);
+		assert.equal(details.herdr.argv[details.herdr.argv.indexOf("--herdr-parent-pane") + 1], parentPane);
 		assert.equal(details.promptSubmitted, true);
 		assert.equal(JSON.parse(result.content[0].type === "text" ? result.content[0].text : "{}").promptSubmitted, true);
 		herdr(["agent", "wait", name, "--until", "done", "--timeout", "30000"]);
@@ -169,12 +180,29 @@ try {
 				message.model === details.model.split("/")[1] &&
 				content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("").trim() === "OK";
 		}));
+		assert.ok(parentSessionFile);
+		let report = "";
+		for (let attempt = 0; attempt < 40 && !report; attempt++) {
+			const parentEntries = await readChildSession(parentSessionFile);
+			for (const entry of parentEntries) {
+				const message = entry.type === "message" ? record(entry.message) : undefined;
+				if (message?.role !== "user" || !Array.isArray(message.content)) continue;
+				const text = message.content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("");
+				if (text.includes(`[Subagent report `) && text.includes(name)) report = text;
+			}
+			if (!report) await new Promise((resolve) => setTimeout(resolve, 250));
+		}
+		assert.match(report, /; stop\]\nOK\n\nFollow-up:/);
+		assert.ok(report.includes(`herdr agent prompt ${details.pane} "<task>"`));
+		console.log("parent received automatic report:", report.trim());
 		const closed = herdr(["pane", "close", details.pane]);
 		assert.equal(record(closed.result).type, "ok");
 		createdPane = undefined;
 		console.log("disposable Herdr integration passed: Pi resource-loaded package, assembled tool, exact provider ping, and child effective model/thinking session entries");
 	} finally {
 		sdkSession?.dispose();
+		if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+		else process.env.HERDR_PANE_ID = previousPane;
 		if (previousSocket === undefined) delete process.env.HERDR_SOCKET_PATH;
 		else process.env.HERDR_SOCKET_PATH = previousSocket;
 	}
@@ -209,6 +237,7 @@ try {
 	}
 	if (stopped) {
 		try {
+			if (parentSessionFile) removeChildSessionArtifact(parentSessionFile);
 			control(["session", "delete", "--json", session], "disposable Herdr session delete");
 		} catch (error) {
 			cleanupErrors.push(error instanceof Error ? error.message : "disposable Herdr session delete failed");

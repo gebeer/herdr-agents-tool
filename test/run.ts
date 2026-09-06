@@ -5,10 +5,13 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { verifyChildProfile } from "../src/child-profile.js";
+import { childNotifyChecks } from "./child-notify.js";
 import { requirePaneCloseSuccess, runHerdr } from "../src/herdr-cli.js";
 import { selectModel, startHerdrPiAgent } from "../src/start.js";
 import type { SelectedProfile } from "../src/types.js";
 
+const previousPane = process.env.HERDR_PANE_ID;
+process.env.HERDR_PANE_ID = "w-test:parent";
 const root = mkdtempSync(join(tmpdir(), "herdr-agents-tool-test-"));
 const profile: SelectedProfile = {
 	model: "test/model",
@@ -233,7 +236,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 				return herdrResponse({
 					type: "agent_started",
 					agent: { name: scenario.input.name, pane_id: scenario.pane, agent: "pi", interactive_ready: true, launch_pending: false },
-					argv: ["pi", "--name", scenario.input.name, "--model", profile.model, "--thinking", profile.thinking],
+					argv: ["pi", ...args.slice(args.indexOf("--") + 1)],
 				});
 			},
 		};
@@ -241,6 +244,10 @@ async function placementAndCompensationChecks(): Promise<void> {
 		assert.deepEqual(calls[0]?.args, scenario.createArgs);
 		assert.equal(calls[0]?.timeout, 10_000);
 		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
+		const launchArgs = calls[1]!.args;
+		assert.equal(launchArgs[launchArgs.indexOf("--herdr-parent-pane") + 1], "w-test:parent");
+		assert.ok(launchArgs[launchArgs.indexOf("--extension") + 1]?.endsWith("/src/child-notify.ts"));
+		assert.match(launchArgs[launchArgs.indexOf("--append-system-prompt") + 1]!, /Do not spawn additional subagents/);
 		assert.equal(started.details.pane, scenario.pane);
 		assert.equal(calls.length, 2, "omitted prompt must not submit anything");
 		assert.equal("promptSubmitted" in started.details, false);
@@ -317,7 +324,7 @@ async function promptChecks(): Promise<void> {
 				if (args[1] === "start") return herdrResponse({
 					type: "agent_started",
 					agent: { ...agent, interactive_ready: scenario !== "not-ready" },
-					argv: ["pi", "--name", agent.name, "--model", profile.model, "--thinking", profile.thinking],
+					argv: ["pi", ...args.slice(args.indexOf("--") + 1)],
 				});
 				if (args[1] === "close") return herdrResponse({ type: "ok" });
 				assert.deepEqual(args, ["agent", "prompt", agent.name, prompt]);
@@ -364,7 +371,10 @@ try {
 	await inputValidationChecks();
 	await placementAndCompensationChecks();
 	await promptChecks();
+	await childNotifyChecks();
 	console.log("unit checks passed: child trust/auth, Herdr envelopes, placements, compensation, and runtime input validation");
 } finally {
 	rmSync(root, { recursive: true, force: true });
+	if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
+	else process.env.HERDR_PANE_ID = previousPane;
 }
