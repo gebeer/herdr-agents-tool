@@ -181,24 +181,37 @@ try {
 				content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("").trim() === "OK";
 		}));
 		assert.ok(parentSessionFile);
-		let report = "";
-		for (let attempt = 0; attempt < 40 && !report; attempt++) {
-			const parentEntries = await readChildSession(parentSessionFile);
-			for (const entry of parentEntries) {
-				const message = entry.type === "message" ? record(entry.message) : undefined;
-				if (message?.role !== "user" || !Array.isArray(message.content)) continue;
-				const text = message.content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("");
-				if (text.includes(`[Subagent report `) && text.includes(name)) report = text;
+		for (const expected of ["OK", "FOLLOW_UP_OK"]) {
+			if (expected === "FOLLOW_UP_OK") {
+				const prompted = record(herdr(["agent", "prompt", details.pane,
+					"Do not use tools or memory. Reply exactly FOLLOW_UP_OK", "--wait", "--timeout", "30000",
+				]).result);
+				assert.equal(prompted.type, "agent_prompted");
+				const sameChild = record(prompted.agent);
+				assert.equal(sameChild.name, name);
+				assert.equal(sameChild.pane_id, details.pane);
+				assert.equal(childSessionReference(sameChild), childSessionFile, "follow-up must reuse the child session");
 			}
-			if (!report) await new Promise((resolve) => setTimeout(resolve, 250));
+			const header = `[Subagent report ${JSON.stringify({ name, pane: details.pane })}; stop]`;
+			let report = "";
+			for (let attempt = 0; attempt < 40 && !report; attempt++) {
+				const parentEntries = await readChildSession(parentSessionFile);
+				for (const entry of parentEntries) {
+					const message = entry.type === "message" ? record(entry.message) : undefined;
+					if (message?.role !== "user" || !Array.isArray(message.content)) continue;
+					const text = message.content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("");
+					if (text.includes(`${header}\n${expected}\n\nFollow-up:`)) report = text;
+				}
+				if (!report) await new Promise((resolve) => setTimeout(resolve, 250));
+			}
+			assert.ok(report, `parent must receive the ${expected} report from the same child`);
+			assert.ok(report.includes(`herdr agent prompt ${details.pane} "<task>"`));
+			console.log("parent received automatic report:", report.trim());
 		}
-		assert.match(report, /; stop\]\nOK\n\nFollow-up:/);
-		assert.ok(report.includes(`herdr agent prompt ${details.pane} "<task>"`));
-		console.log("parent received automatic report:", report.trim());
 		const closed = herdr(["pane", "close", details.pane]);
 		assert.equal(record(closed.result).type, "ok");
 		createdPane = undefined;
-		console.log("disposable Herdr integration passed: Pi resource-loaded package, assembled tool, exact provider ping, and child effective model/thinking session entries");
+		console.log("disposable Herdr integration passed: Pi resource-loaded tool, effective model/thinking, initial report, and follow-up report from the same child session");
 	} finally {
 		sdkSession?.dispose();
 		if (previousPane === undefined) delete process.env.HERDR_PANE_ID;
