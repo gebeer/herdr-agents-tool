@@ -10,6 +10,7 @@ import {
 	DIRECTIONS,
 	PLACEMENTS,
 	THINKING_LEVELS,
+	TOOL_NAME,
 	type Direction,
 	type HerdrStartAgentInput,
 	type OwnedLocation,
@@ -270,6 +271,7 @@ function createArgs(
 function expectedPiArgv(name: string, profile: SelectedProfile, parentPane: string): string[] {
 	return [
 		"--name", name, "--model", profile.model, "--thinking", profile.thinking,
+		"--exclude-tools", TOOL_NAME,
 		"--extension", fileURLToPath(new URL("./child-notify.ts", import.meta.url)),
 		"--herdr-parent-pane", parentPane,
 		"--append-system-prompt", `You are a subagent. Do not spawn additional subagents. Your orchestrator is in Herdr pane ${parentPane}. Automatic completion reporting is installed; do not send a separate completion notification.`,

@@ -245,6 +245,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 		assert.equal(calls[0]?.timeout, 10_000);
 		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
 		const launchArgs = calls[1]!.args;
+		assert.equal(launchArgs[launchArgs.indexOf("--exclude-tools") + 1], "herdr_start_agent");
 		assert.equal(launchArgs[launchArgs.indexOf("--herdr-parent-pane") + 1], "w-test:parent");
 		assert.ok(launchArgs[launchArgs.indexOf("--extension") + 1]?.endsWith("/src/child-notify.ts"));
 		assert.match(launchArgs[launchArgs.indexOf("--append-system-prompt") + 1]!, /Do not spawn additional subagents/);

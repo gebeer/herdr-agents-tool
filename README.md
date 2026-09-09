@@ -44,7 +44,7 @@ Placement defaults to a new tab in the orchestrator's workspace. Use `placement:
 
 ## Completion reports
 
-The launcher explicitly loads `src/child-notify.ts` through Pi's `--extension` flag and passes the calling pane as `--herdr-parent-pane`. Its appended system prompt identifies the child as a subagent, prohibits spawning further subagents, and explains that reporting is automatic. This is not a sandbox or a tool-permission restriction.
+The launcher explicitly loads `src/child-notify.ts` through Pi's `--extension` flag and passes the calling pane as `--herdr-parent-pane`. Its appended system prompt identifies the child as a subagent, prohibits spawning further subagents, and explains that reporting is automatic. Children also launch with `--exclude-tools herdr_start_agent`, keeping the spawning tool out of their active tool set. This is not a sandbox: other tools can still launch processes.
 
 After `agent_settled` (including automatic retries and queued follow-ups), the child sends its latest assistant text to the orchestrator with `herdr agent prompt <parent-pane> <report>`. Reports identify the child and stop reason, exclude thinking, and cap response text at 16,000 UTF-16 code units with a truncation notice. They report settlement, not proof of task success. No notification is sent on initial startup. Children remain open for follow-ups; each report includes the exact `herdr agent prompt <child-pane> "<task>"` command. Later tasks also produce reports. Each report also includes a cleanup command that sends SIGTERM to the child Pi process, waits up to ten seconds for it to exit using GNU `tail --pid`, and closes its Herdr pane only if both steps succeed.
 
