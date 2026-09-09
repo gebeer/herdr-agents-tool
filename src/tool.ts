@@ -24,7 +24,7 @@ export function registerHerdrStartAgentTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: TOOL_NAME,
 		label: "Start Herdr Agent",
-		description: "Start one Pi agent in a new Herdr pane, tab, or workspace. In Herdr, use this tool exclusively to start subagents, not other launch tools or direct CLI commands. Include an initial task prompt unless the user explicitly requests an agent without one. This tool does not wait for task completion. The child automatically attempts to send its final response back to your pane; routine result polling is unnecessary.",
+		description: "Start one Pi agent in a new Herdr pane, tab, or workspace. In Herdr, use this tool exclusively to start subagents, not other launch tools or direct CLI commands. Include an initial task prompt unless the user explicitly requests an agent without one. This tool does not wait for task completion. The child automatically injects a subagent report into your session; do not poll for results.",
 		parameters: schema,
 		async execute(_toolCallId, input: ToolInput, signal, _onUpdate, ctx) {
 			const started = await startHerdrPiAgent(pi, input as HerdrStartAgentInput, signal, ctx);
