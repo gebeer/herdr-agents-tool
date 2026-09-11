@@ -35,7 +35,7 @@ export default function childNotify(pi: ExtensionAPI): void {
 			const body = text.length > 16_000 ? `${text.slice(0, 16_000)}\n[Truncated; full response remains in the child session.]` : text;
 			const sender = JSON.stringify({ name: pi.getSessionName(), pane });
 			// Herdr can concatenate concurrent pastes. Frame each report independently.
-			const report = `\n[Subagent report ${sender}; ${status}]\n${body || "(No response text.)"}\n\nFollow-up: herdr agent prompt ${pane} "<task>" — this child remains available and will report back automatically.\nCleanup when no longer needed: kill -TERM ${process.pid} && timeout 10s tail --pid=${process.pid} -f /dev/null && herdr pane close ${pane}\n[End subagent report]\n`;
+			const report = `\n[Subagent report ${sender}; ${status}]\nNEXT ACTION — After reviewing this report:\nSend a follow-up if more work is needed; otherwise close this agent.\nFollow-up: herdr agent prompt ${pane} "<task>"\nSafe Cleanup: kill -TERM ${process.pid} && timeout 10s tail --pid=${process.pid} -f /dev/null && herdr pane close ${pane}\n\n${body || "(No response text.)"}\n[End subagent report]\n`;
 			const response = await runHerdr(pi, resolveHerdrBinary(), ["agent", "prompt", parent, report], {
 				cwd: ctx.cwd, timeout: 10_000, stage: "completion notification",
 			});

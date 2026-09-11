@@ -40,8 +40,8 @@ export async function childNotifyChecks(): Promise<void> {
 			assert.equal(calls.length, 1, "settlement sends once, even after delivery failure");
 			const report = calls[0]![3]!;
 			assert.ok(report.startsWith("\n[Subagent report ") && report.endsWith("[End subagent report]\n"));
-			assert.ok(report.includes(`Follow-up: herdr agent prompt ${process.env.HERDR_PANE_ID} "<task>" — this child remains available and will report back automatically.`));
-			assert.ok(report.endsWith(`Cleanup when no longer needed: kill -TERM ${process.pid} && timeout 10s tail --pid=${process.pid} -f /dev/null && herdr pane close ${process.env.HERDR_PANE_ID}\n[End subagent report]\n`));
+			const reportBody = outcome === "empty" ? "(No response text.)" : outcome === "long" ? "x".repeat(16_000) : "Final 日本語";
+			assert.ok(report.includes(`]\nNEXT ACTION — After reviewing this report:\nSend a follow-up if more work is needed; otherwise close this agent.\nFollow-up: herdr agent prompt ${process.env.HERDR_PANE_ID} "<task>"\nSafe Cleanup: kill -TERM ${process.pid} && timeout 10s tail --pid=${process.pid} -f /dev/null && herdr pane close ${process.env.HERDR_PANE_ID}\n\n${reportBody}`));
 			assert.ok(!report.includes("private reasoning") && !report.includes("stale"));
 			assert.ok(report.includes(outcome === "empty" ? "no final response" : outcome));
 			if (outcome === "long") assert.ok(report.includes("Truncated") && report.length < 17_000);
