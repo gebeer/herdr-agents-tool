@@ -102,7 +102,7 @@ function parseCanonicalModel(input: string): { provider: string; id: string } | 
 }
 
 export function expandModelAlias(requested: string): string {
-	return MODEL_ALIASES[requested as keyof typeof MODEL_ALIASES] ?? requested;
+	return Object.hasOwn(MODEL_ALIASES, requested) ? MODEL_ALIASES[requested as keyof typeof MODEL_ALIASES] : requested;
 }
 
 export function selectModel(ctx: ExtensionContext, requested: string | undefined): Model<any> {

@@ -96,7 +96,9 @@ function modelAliasChecks(): void {
 		assert.equal(model.id, id);
 	}
 	assert.deepEqual(lookups, aliases.map(([, provider, id]) => `${provider}/${id}`));
-	assert.throws(() => selectModel(context, "unknown"), /exact provider\/model-id or sol, terra, luna/);
+	for (const invalid of ["unknown", "constructor", "toString", "__proto__"]) {
+		assert.throws(() => selectModel(context, invalid), /invalid model: use one exact provider\/model-id or sol, terra, luna/);
+	}
 }
 
 async function untrustedProjectCheck(): Promise<void> {
