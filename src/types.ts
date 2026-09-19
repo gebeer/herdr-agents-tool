@@ -20,9 +20,21 @@ export interface HerdrStartAgentInput {
 	prompt?: string;
 }
 
+export interface ProfileDescription {
+	model?: string;
+	thinking?: ThinkingLevel | "off";
+}
+
+export interface FallbackSelection {
+	requested: ProfileDescription;
+	selected: Required<ProfileDescription>;
+	reason: string;
+}
+
 export interface SelectedProfile {
 	model: string;
 	thinking: ThinkingLevel | "off";
+	fallback?: FallbackSelection;
 }
 
 export interface OwnedLocation {
@@ -39,6 +51,7 @@ export interface StartResultDetails {
 	model: string;
 	thinking: ThinkingLevel | "off";
 	herdr: unknown;
+	fallback?: FallbackSelection;
 	promptSubmitted?: true;
 }
 

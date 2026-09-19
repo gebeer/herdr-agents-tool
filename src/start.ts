@@ -1,9 +1,9 @@
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { verifyChildProfile } from "./child-profile.js";
 import { requirePaneCloseSuccess, resolveHerdrBinary, runHerdr } from "./herdr-cli.js";
 import {
@@ -28,11 +28,27 @@ const PROMPT_TIMEOUT_MS = 10_000;
 const HERDR_READY_TIMEOUT_MS = 30_000;
 const COMPENSATION_TIMEOUT_MS = 5_000;
 const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
-const MODEL_ALIASES = {
-	sol: "openai-codex/gpt-5.6-sol",
-	terra: "openai-codex/gpt-5.6-terra",
-	luna: "openai-codex/gpt-5.6-luna",
-} as const;
+const CONFIG_FILE = "herdr-agents.json";
+const ALIAS_PATTERN = /^[a-z][a-z0-9_-]*$/;
+
+export type ModelProfile = {
+	model: string;
+	thinking: RequestedThinking;
+};
+
+export type ModelConfig = {
+	fallback: ModelProfile;
+	aliases: Record<string, ModelProfile>;
+};
+
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
+	fallback: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
+	aliases: {
+		sol: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
+		terra: { model: "openai-codex/gpt-5.6-terra", thinking: "medium" },
+		luna: { model: "openai-codex/gpt-5.6-luna", thinking: "medium" },
+	},
+};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -101,23 +117,83 @@ function parseCanonicalModel(input: string): { provider: string; id: string } | 
 	return { provider, id };
 }
 
-export function expandModelAlias(requested: string): string {
-	return Object.hasOwn(MODEL_ALIASES, requested) ? MODEL_ALIASES[requested as keyof typeof MODEL_ALIASES] : requested;
+function modelProfile(value: unknown, label: string): ModelProfile {
+	const profile = record(value);
+	if (!profile || Object.keys(profile).some((key) => key !== "model" && key !== "thinking")) {
+		throw new StartAgentError("validation", `invalid ${label}: expected model and thinking`);
+	}
+	if (typeof profile.model !== "string" || !parseCanonicalModel(profile.model)) {
+		throw new StartAgentError("validation", `invalid ${label}.model: use one exact provider/model-id`);
+	}
+	if (typeof profile.thinking !== "string" || !THINKING_LEVELS.includes(profile.thinking as RequestedThinking)) {
+		throw new StartAgentError("validation", `invalid ${label}.thinking`);
+	}
+	return { model: profile.model, thinking: profile.thinking as RequestedThinking };
 }
 
-export function selectModel(ctx: ExtensionContext, requested: string | undefined): Model<any> {
-	if (requested === undefined) {
-		if (!ctx.model) throw new StartAgentError("validation", "canonical model unavailable: controller has no active model");
-		const canonical = canonicalModelString(ctx.model);
-		const exact = ctx.modelRegistry.find(ctx.model.provider, ctx.model.id);
-		if (!exact || canonicalModelString(exact) !== canonical) {
-			throw new StartAgentError("validation", "canonical model unavailable: controller model is not in its registry");
-		}
-		return exact;
+function readModelConfig(path: string): Partial<ModelConfig> {
+	if (!existsSync(path)) return {};
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(readFileSync(path, "utf8"));
+	} catch (error) {
+		throw new StartAgentError("validation", `invalid config ${path}: ${error instanceof Error ? error.message : error}`);
 	}
-	const expanded = expandModelAlias(requested);
+	const source = record(parsed);
+	if (!source || Object.keys(source).some((key) => key !== "fallback" && key !== "aliases")) {
+		throw new StartAgentError("validation", `invalid config ${path}: expected fallback and aliases`);
+	}
+	const config: Partial<ModelConfig> = {};
+	if (source.fallback !== undefined) config.fallback = modelProfile(source.fallback, `${path} fallback`);
+	if (source.aliases !== undefined) {
+		const aliases = record(source.aliases);
+		if (!aliases) throw new StartAgentError("validation", `invalid ${path} aliases: expected an object`);
+		config.aliases = {};
+		for (const [name, profile] of Object.entries(aliases)) {
+			if (!ALIAS_PATTERN.test(name)) throw new StartAgentError("validation", `invalid ${path} alias: ${name}`);
+			config.aliases[name] = modelProfile(profile, `${path} alias ${name}`);
+		}
+	}
+	return config;
+}
+
+export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir = getAgentDir()): ModelConfig {
+	let config: ModelConfig = {
+		fallback: { ...DEFAULT_MODEL_CONFIG.fallback },
+		aliases: { ...DEFAULT_MODEL_CONFIG.aliases },
+	};
+	for (const path of [join(agentDir, CONFIG_FILE), ...(projectTrusted ? [join(cwd, CONFIG_DIR_NAME, CONFIG_FILE)] : [])]) {
+		const override = readModelConfig(path);
+		config = {
+			fallback: override.fallback ?? config.fallback,
+			aliases: { ...config.aliases, ...override.aliases },
+		};
+	}
+	return config;
+}
+
+export function expandModelAlias(requested: string, aliases = DEFAULT_MODEL_CONFIG.aliases): string {
+	return Object.hasOwn(aliases, requested) ? aliases[requested]!.model : requested;
+}
+
+export function resolveModelProfile(
+	config: ModelConfig,
+	requestedModel: string | undefined,
+	requestedThinking: RequestedThinking | undefined,
+): ModelProfile {
+	const configured = requestedModel !== undefined && Object.hasOwn(config.aliases, requestedModel)
+		? config.aliases[requestedModel]!
+		: config.fallback;
+	return {
+		model: requestedModel === undefined ? config.fallback.model : expandModelAlias(requestedModel, config.aliases),
+		thinking: requestedThinking ?? configured.thinking,
+	};
+}
+
+export function selectModel(ctx: ExtensionContext, requested: string, aliases = DEFAULT_MODEL_CONFIG.aliases): Model<any> {
+	const expanded = expandModelAlias(requested, aliases);
 	const parsed = parseCanonicalModel(expanded);
-	if (!parsed) throw new StartAgentError("validation", "invalid model: use one exact provider/model-id or sol, terra, luna");
+	if (!parsed) throw new StartAgentError("validation", "invalid model: use one exact provider/model-id or configured alias");
 	const exact = ctx.modelRegistry.find(parsed.provider, parsed.id);
 	if (!exact || canonicalModelString(exact) !== expanded) {
 		throw new StartAgentError("validation", "canonical model unavailable: exact provider/model-id is not known");
@@ -125,9 +201,7 @@ export function selectModel(ctx: ExtensionContext, requested: string | undefined
 	return exact;
 }
 
-function selectThinking(model: Model<any>, inherited: RequestedThinking | undefined, requested: RequestedThinking | undefined): RequestedThinking {
-	const thinking = requested ?? inherited;
-	if (!thinking) throw new StartAgentError("validation", "thinking level unavailable: controller has no active thinking level");
+function selectThinking(model: Model<any>, thinking: RequestedThinking): RequestedThinking {
 	if (!getSupportedThinkingLevels(model).includes(thinking as never)) {
 		throw new StartAgentError("validation", `unsupported thinking level for ${canonicalModelString(model)}`);
 	}
@@ -192,20 +266,87 @@ function validateInput(input: unknown): ValidatedInput {
 	}
 }
 
-async function selectProfile(
+type VerifyProfile = typeof verifyChildProfile;
+
+export async function selectProfileFromConfig(
+	ctx: ExtensionContext,
+	config: ModelConfig,
+	requestedModel: string | undefined,
+	requestedThinking: RequestedThinking | undefined,
+	cwd: string,
+	signal: AbortSignal | undefined,
+	verifyProfile: VerifyProfile = verifyChildProfile,
+): Promise<SelectedProfile> {
+	const check = async (candidate: ModelProfile): Promise<SelectedProfile> => {
+		const model = selectModel(ctx, candidate.model, config.aliases);
+		const profile = {
+			model: canonicalModelString(model),
+			thinking: selectThinking(model, candidate.thinking),
+		};
+		await verifyProfile(profile, DEFAULT_AGENT_DIR, cwd, signal);
+		return profile;
+	};
+
+	if (requestedModel === undefined) {
+		try {
+			const candidate = { ...config.fallback, thinking: requestedThinking ?? config.fallback.thinking };
+			const selected = await check(candidate);
+			return {
+				...selected,
+				fallback: {
+					requested: requestedThinking === undefined ? {} : { thinking: requestedThinking },
+					selected,
+					reason: "model omitted",
+				},
+			};
+		} catch (error) {
+			const reason = error instanceof Error ? error.message : "profile validation failed";
+			throw new StartAgentError("validation", `fallback profile ${config.fallback.model} (${requestedThinking ?? config.fallback.thinking}) failed: ${reason}`);
+		}
+	}
+
+	const requested = resolveModelProfile(config, requestedModel, requestedThinking);
+	try {
+		return await check(requested);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : "profile validation failed";
+		try {
+			const selected = await check(config.fallback);
+			return {
+				...selected,
+				fallback: {
+					requested: { model: requestedModel, thinking: requested.thinking },
+					selected,
+					reason,
+				},
+			};
+		} catch (fallbackError) {
+			const fallbackReason = fallbackError instanceof Error ? fallbackError.message : "profile validation failed";
+			throw new StartAgentError(
+				"validation",
+				`requested profile ${requested.model} (${requested.thinking}) failed: ${reason}; fallback profile ${config.fallback.model} (${config.fallback.thinking}) failed: ${fallbackReason}`,
+			);
+		}
+	}
+}
+
+export function selectProfile(
 	ctx: ExtensionContext,
 	requestedModel: string | undefined,
 	requestedThinking: RequestedThinking | undefined,
 	cwd: string,
 	signal: AbortSignal | undefined,
+	verifyProfile: VerifyProfile = verifyChildProfile,
 ): Promise<SelectedProfile> {
-	const model = selectModel(ctx, requestedModel);
-	const profile: SelectedProfile = {
-		model: canonicalModelString(model),
-		thinking: selectThinking(model, ctx.thinkingLevel as RequestedThinking | undefined, requestedThinking),
-	};
-	await verifyChildProfile(profile, DEFAULT_AGENT_DIR, cwd, signal);
-	return profile;
+	return selectProfileFromConfig(
+		ctx,
+		loadModelConfig(cwd, ctx.isProjectTrusted()),
+		requestedModel,
+		requestedThinking,
+		cwd,
+		signal,
+		verifyProfile,
+	);
 }
 
 export type StartHerdrPiAgentDependencies = {
@@ -216,6 +357,7 @@ export type StartHerdrPiAgentDependencies = {
 		cwd: string,
 		signal: AbortSignal | undefined,
 	) => Promise<SelectedProfile>;
+	verifyProfile?: VerifyProfile;
 };
 
 function parseCreatedLocation(placement: Placement, result: JsonRecord): OwnedLocation {
@@ -334,7 +476,9 @@ export async function startHerdrPiAgent(
 	const parentPane = id(process.env.HERDR_PANE_ID);
 	if (!parentPane) throw new StartAgentError("validation", "invalid Herdr context: orchestrator pane is unavailable");
 	const cwd = normalizeCwd(ctx.cwd, request.cwd);
-	const profile = await (dependencies.selectProfile ?? selectProfile)(ctx, request.model, request.thinking, cwd, signal);
+	const profile = dependencies.selectProfile
+		? await dependencies.selectProfile(ctx, request.model, request.thinking, cwd, signal)
+		: await selectProfile(ctx, request.model, request.thinking, cwd, signal, dependencies.verifyProfile);
 	const binary = resolveHerdrBinary();
 	const argv = expectedPiArgv(request.name, profile, parentPane);
 	let owned: OwnedLocation | undefined;
@@ -403,7 +547,16 @@ export async function startHerdrPiAgent(
 		model: profile.model,
 		thinking: profile.thinking,
 		herdr: started.result,
+		...(profile.fallback ? { fallback: profile.fallback } : {}),
 		...submission,
 	};
-	return { text: JSON.stringify({ name: request.name, pane: owned.paneId, ...submission }), details };
+	return {
+		text: JSON.stringify({
+			name: request.name,
+			pane: owned.paneId,
+			...(profile.fallback ? { fallback: profile.fallback } : {}),
+			...submission,
+		}),
+		details,
+	};
 }

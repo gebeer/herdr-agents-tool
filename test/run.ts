@@ -7,7 +7,7 @@ import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-
 import { verifyChildProfile } from "../src/child-profile.js";
 import { childNotifyChecks } from "./child-notify.js";
 import { requirePaneCloseSuccess, runHerdr } from "../src/herdr-cli.js";
-import { selectModel, startHerdrPiAgent } from "../src/start.js";
+import { loadModelConfig, resolveModelProfile, selectModel, selectProfileFromConfig, startHerdrPiAgent, type ModelConfig } from "../src/start.js";
 import type { SelectedProfile } from "../src/types.js";
 
 const previousPane = process.env.HERDR_PANE_ID;
@@ -97,8 +97,105 @@ function modelAliasChecks(): void {
 	}
 	assert.deepEqual(lookups, aliases.map(([, provider, id]) => `${provider}/${id}`));
 	for (const invalid of ["unknown", "constructor", "toString", "__proto__"]) {
-		assert.throws(() => selectModel(context, invalid), /invalid model: use one exact provider\/model-id or sol, terra, luna/);
+		assert.throws(() => selectModel(context, invalid), /invalid model: use one exact provider\/model-id or configured alias/);
 	}
+}
+
+function modelConfigChecks(): void {
+	const emptyAgentDir = join(root, "empty-agent-config");
+	const defaults = loadModelConfig(root, false, emptyAgentDir);
+	assert.deepEqual(defaults, {
+		fallback: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
+		aliases: {
+			sol: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
+			terra: { model: "openai-codex/gpt-5.6-terra", thinking: "medium" },
+			luna: { model: "openai-codex/gpt-5.6-luna", thinking: "medium" },
+		},
+	});
+
+	const agentDir = join(root, "agent-config");
+	const project = join(root, "config-project");
+	mkdirSync(join(project, ".pi"), { recursive: true });
+	mkdirSync(agentDir, { recursive: true });
+	writeFileSync(join(agentDir, "herdr-agents.json"), JSON.stringify({
+		fallback: { model: "global/fallback", thinking: "low" },
+		aliases: { fast: { model: "global/fast", thinking: "minimal" } },
+	}));
+	writeFileSync(join(project, ".pi", "herdr-agents.json"), JSON.stringify({
+		fallback: { model: "project/fallback", thinking: "high" },
+		aliases: { fast: { model: "project/fast", thinking: "medium" } },
+	}));
+
+	const global = loadModelConfig(project, false, agentDir);
+	assert.deepEqual(resolveModelProfile(global, undefined, undefined), { model: "global/fallback", thinking: "low" });
+	assert.deepEqual(resolveModelProfile(global, "fast", "high"), { model: "global/fast", thinking: "high" });
+
+	const projectConfig = loadModelConfig(project, true, agentDir);
+	assert.deepEqual(resolveModelProfile(projectConfig, undefined, undefined), { model: "project/fallback", thinking: "high" });
+	assert.deepEqual(resolveModelProfile(projectConfig, "fast", undefined), { model: "project/fast", thinking: "medium" });
+	assert.deepEqual(resolveModelProfile(projectConfig, "exact/model", undefined), { model: "exact/model", thinking: "high" });
+}
+
+async function profileFallbackChecks(): Promise<void> {
+	const config: ModelConfig = {
+		fallback: { model: "test/fallback", thinking: "medium" },
+		aliases: { requested: { model: "test/requested", thinking: "medium" } },
+	};
+	const models = new Map([
+		["test/fallback", { provider: "test", id: "fallback", reasoning: true }],
+		["test/requested", { provider: "test", id: "requested", reasoning: true }],
+		["test/no-reasoning", { provider: "test", id: "no-reasoning", reasoning: false }],
+	]);
+	const context = {
+		modelRegistry: { find: (provider: string, id: string) => models.get(`${provider}/${id}`) },
+	} as never;
+	const checks: string[] = [];
+	const verify = async (checked: SelectedProfile): Promise<void> => { checks.push(`${checked.model}:${checked.thinking}`); };
+
+	const ordinary = await selectProfileFromConfig(context, config, "requested", undefined, root, undefined, verify);
+	assert.equal(ordinary.fallback, undefined);
+	assert.deepEqual(checks.splice(0), ["test/requested:medium"]);
+
+	for (const [requested, thinking, reason] of [
+		["unknown", undefined, "invalid model"],
+		["bad model", undefined, "invalid model"],
+		["test/unavailable", undefined, "canonical model unavailable"],
+		["test/no-reasoning", "high", "unsupported thinking level"],
+	] as const) {
+		const selected = await selectProfileFromConfig(context, config, requested, thinking, root, undefined, verify);
+		assert.equal(selected.model, "test/fallback");
+		assert.equal(selected.fallback?.requested.model, requested);
+		assert.match(selected.fallback?.reason ?? "", new RegExp(reason));
+		assert.deepEqual(checks.splice(0), ["test/fallback:medium"]);
+	}
+
+	const preflight = await selectProfileFromConfig(context, config, "requested", undefined, root, undefined, async (checked) => {
+		checks.push(checked.model);
+		if (checked.model === "test/requested") throw new Error("requested auth unavailable");
+	});
+	assert.equal(preflight.fallback?.reason, "requested auth unavailable");
+	assert.deepEqual(checks.splice(0), ["test/requested", "test/fallback"]);
+
+	const omitted = await selectProfileFromConfig(context, config, undefined, "high", root, undefined, verify);
+	assert.equal(omitted.thinking, "high");
+	assert.equal(omitted.fallback?.reason, "model omitted");
+	assert.deepEqual(omitted.fallback?.requested, { thinking: "high" });
+	assert.deepEqual(checks.splice(0), ["test/fallback:high"]);
+
+	const bothFailed = () => selectProfileFromConfig(context, config, "requested", undefined, root, undefined, async (checked) => {
+		throw new Error(checked.model === "test/requested" ? "requested preflight" : "fallback preflight");
+	});
+	await expectReject(bothFailed, "requested profile test/requested (medium) failed: requested preflight; fallback profile test/fallback (medium) failed: fallback preflight");
+
+	let layoutCalls = 0;
+	await expectReject(() => startHerdrPiAgent(
+		{ exec: async () => { layoutCalls++; throw new Error("must not mutate layout"); } } as never,
+		{ name: "fallbackfailure", placement: "workspace", model: "requested" },
+		undefined,
+		{ cwd: root } as never,
+		{ selectProfile: bothFailed },
+	), "requested profile test/requested (medium) failed: requested preflight; fallback profile test/fallback (medium) failed: fallback preflight");
+	assert.equal(layoutCalls, 0, "both profile failures must happen before layout mutation");
 }
 
 async function untrustedProjectCheck(): Promise<void> {
@@ -257,6 +354,36 @@ async function placementAndCompensationChecks(): Promise<void> {
 		assert.deepEqual(JSON.parse(started.text), { name: scenario.input.name, pane: scenario.pane });
 	}
 
+	const fallbackProfile: SelectedProfile = {
+		...profile,
+		fallback: {
+			requested: { model: "missing", thinking: "high" },
+			selected: profile,
+			reason: "canonical model unavailable",
+		},
+	};
+	let fallbackCall = 0;
+	const fallbackPi = {
+		exec: async (_command: string, args: string[]) => {
+			fallbackCall++;
+			if (fallbackCall === 1) return herdrResponse({ type: "pane_info", pane: { pane_id: "w1:p8" } });
+			return herdrResponse({
+				type: "agent_started",
+				agent: { name: "fallbackcheck", pane_id: "w1:p8", agent: "pi", interactive_ready: true, launch_pending: false },
+				argv: ["pi", ...args.slice(args.indexOf("--") + 1)],
+			});
+		},
+	};
+	const fallbackStarted = await startHerdrPiAgent(
+		fallbackPi as never,
+		{ name: "fallbackcheck", placement: "pane", model: "missing", thinking: "high" },
+		undefined,
+		{ cwd: root } as never,
+		{ selectProfile: async () => fallbackProfile },
+	);
+	assert.deepEqual(JSON.parse(fallbackStarted.text).fallback, fallbackProfile.fallback);
+	assert.deepEqual(fallbackStarted.details.fallback, fallbackProfile.fallback);
+
 	const outer = new AbortController();
 	const calls: Array<{ args: string[]; signal?: AbortSignal }> = [];
 	const pi = {
@@ -367,6 +494,8 @@ async function promptChecks(): Promise<void> {
 
 try {
 	modelAliasChecks();
+	modelConfigChecks();
+	await profileFallbackChecks();
 	await untrustedProjectCheck();
 	await commandAuthCheck();
 	await childProfileChecks();

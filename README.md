@@ -2,7 +2,7 @@
 
 A deliberately narrow Pi package with one tool: `herdr_start_agent`.
 
-Inside a Herdr-managed Pi pane, it creates one new pane, tab, or workspace without focusing it, then starts one interactive Pi agent there. It accepts an exact registered `provider/model-id` (or one of three exact model aliases) and a thinking level supported by that model. It can submit an optional initial prompt after readiness. It loads a child-only completion notifier. The orchestrator tool does not start in existing panes, monitor children, retain state, or change active-tool selection.
+Inside a Herdr-managed Pi pane, it creates one new pane, tab, or workspace without focusing it, then starts one interactive Pi agent there. It accepts an exact registered `provider/model-id` or configured model alias and a thinking level supported by that model. It can submit an optional initial prompt after readiness. It loads a child-only completion notifier. The orchestrator tool does not start in existing panes, monitor children, retain state, or change active-tool selection.
 
 ## Loading
 
@@ -23,6 +23,23 @@ Without that local install, the isolated child-profile preflight cannot resolve 
 
 The package registers nothing unless `HERDR_ENV=1`, `HERDR_PANE_ID`, and `HERDR_WORKSPACE_ID` are present. Inside Herdr, its description directs orchestrators to use it exclusively for starting subagents, rather than other launch tools or direct CLI commands. Include an initial task prompt unless the user explicitly requests an agent without one. This is model guidance, not runtime enforcement; communication tools remain unaffected.
 
+## Configuration
+
+Model profiles live in `~/.pi/agent/herdr-agents.json`. A trusted project's `.pi/herdr-agents.json` may override the fallback or individual aliases. Each profile contains an exact `provider/model-id` and its default thinking effort:
+
+```json
+{
+  "fallback": { "model": "openai-codex/gpt-5.6-sol", "thinking": "medium" },
+  "aliases": {
+    "sol": { "model": "openai-codex/gpt-5.6-sol", "thinking": "medium" },
+    "terra": { "model": "openai-codex/gpt-5.6-terra", "thinking": "medium" },
+    "luna": { "model": "openai-codex/gpt-5.6-luna", "thinking": "medium" }
+  }
+}
+```
+
+Configuration is read for each launch, so edits do not require `/reload`. Project aliases merge over global aliases; project configuration is ignored unless Pi trusts the project. Invalid configuration fails immediately and is never bypassed with a fallback.
+
 ## Tool
 
 ```ts
@@ -30,15 +47,19 @@ herdr_start_agent({
   name: "reviewer",
   placement: "tab", // default; pane | tab | workspace
   cwd: "/work/project",
-  model: "terra", // or exact canonical provider/model-id
-  thinking: "high",
+  model: "terra", // configured alias or exact provider/model-id
+  thinking: "high", // overrides the alias default
   prompt: "Review the current diff. Report actionable findings only.", // optional
 })
 ```
 
 Placement defaults to a new tab in the orchestrator's workspace. Use `placement: "pane"` only when the user explicitly requests a split pane; `direction` then defaults to `"right"`.
 
-`name` must match `[a-z][a-z0-9_-]{0,31}`. `sol`, `terra`, and `luna` expand only to `openai-codex/gpt-5.6-sol`, `openai-codex/gpt-5.6-terra`, and `openai-codex/gpt-5.6-luna`; every other supplied model must be an exact registered `provider/model-id`. Expansion happens before registry lookup, child-profile preflight, and Herdr launch, which use the canonical model. Omitted model and thinking inherit the controller only when both can be validated exactly. Every new pane explicitly sets `PI_CODING_AGENT_DIR=$HOME/.pi/agent` through Herdr's `--env`, so child agents use the default Pi profile even when the orchestrator or Herdr server uses another profile (such as `pi-clawa`). This does not change the requested working directory or model/thinking inheritance.
+`name` must match `[a-z][a-z0-9_-]{0,31}`. A configured alias expands before registry lookup, child-profile preflight, and Herdr launch. An explicit thinking value overrides that alias's default. An exact `provider/model-id` uses the fallback thinking value when thinking is omitted.
+
+The requested profile is checked first. If its model is malformed, unknown, unavailable, incompatible with the thinking level, or rejected by child-profile preflight/auth, the configured fallback profile is checked before Herdr changes the layout. Omitting `model` selects the fallback directly; an explicit `thinking` still overrides its default. Automatic fallback use is reported in both tool text and details with the requested profile (when available), selected fallback profile, and reason. If fallback also fails, the error includes both failures and no pane, tab, or workspace is created. Invalid configuration, other invalid tool input, invalid cwd/Herdr context, and failures after layout creation do not trigger fallback.
+
+Every new pane explicitly sets `PI_CODING_AGENT_DIR=$HOME/.pi/agent` through Herdr's `--env`, so child agents use the default Pi profile even when the orchestrator or Herdr server uses another profile (such as `pi-clawa`). This does not change the requested working directory or configured model profile.
 
 `prompt`, when supplied, must be nonblank text without NUL bytes; whitespace is preserved. After Herdr confirms interactive readiness, the tool submits it once with a ten-second deadline and returns `promptSubmitted: true` in the text result and details. This acknowledges submission, not completion. Omitting the prompt starts an idle agent and leaves the compact result unchanged.
 

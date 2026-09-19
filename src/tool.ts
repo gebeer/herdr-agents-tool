@@ -12,8 +12,8 @@ const schema = Type.Object(
 		workspace: Type.Optional(Type.String({ description: "Workspace ID for tab placement." })),
 		direction: Type.Optional(StringEnum(DIRECTIONS, { description: "Pane split direction." })),
 		cwd: Type.Optional(Type.String({ description: "Existing directory for the new location." })),
-		model: Type.Optional(Type.String({ description: "Exact provider/model-id, or sol, terra, or luna." })),
-		thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: "Supported thinking level." })),
+		model: Type.Optional(Type.String({ description: "Exact provider/model-id or configured alias. Defaults to the configured fallback model." })),
+		thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: "Thinking effort. Overrides the alias or fallback default; for 'sol high', pass model 'sol' and thinking 'high'." })),
 	},
 	{ additionalProperties: false },
 );
