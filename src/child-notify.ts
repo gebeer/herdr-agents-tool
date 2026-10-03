@@ -1,5 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { herdrId } from "../core/herdr.js";
 import { formatSubagentReport, isReportAcknowledged, processCleanupCommand } from "../protocol/report.js";
 import { resolveHerdrBinary, runHerdr } from "./herdr-cli.js";
 
@@ -24,11 +25,11 @@ export default function childNotify(pi: ExtensionAPI): void {
 		active = false;
 		const message = last;
 		last = undefined;
-		const parent = pi.getFlag("herdr-parent-pane");
+		const parent = herdrId(pi.getFlag("herdr-parent-pane"));
 		const pane = process.env.HERDR_PANE_ID;
 		if (process.env.HERDR_ENV !== "1" || !pane || ctx.mode !== "tui") return;
 		try {
-			if (typeof parent !== "string" || !parent || parent !== parent.trim() || /[\0\r\n]/.test(parent) || parent === pane) {
+			if (!parent || parent === pane) {
 				throw new Error("missing or invalid orchestrator pane");
 			}
 			const status = message?.stopReason ?? "no final response";

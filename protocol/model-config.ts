@@ -1,6 +1,6 @@
 /**
  * Pi child model profiles (`herdr-agents.json`), shared by the pi orchestrator (src/start.ts)
- * and the Claude Code orchestrator (hooks/profiles.ts). Pure: no imports, so both hosts load it.
+ * and the Claude Code orchestrator (hooks/launch.ts). Pure: no imports, so both hosts load it.
  */
 
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;

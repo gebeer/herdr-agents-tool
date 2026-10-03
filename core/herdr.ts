@@ -69,14 +69,16 @@ function parseSuccess(stage: string, kind: "uncertain-create" | "startup", stdou
 	return { id: envelope.id, result };
 }
 
-/** Executes one Herdr CLI request through the host's argv API, without a shell. */
+/**
+ * Executes one Herdr CLI request through the host's argv API, without a shell. `isCreate`
+ * marks a layout create, whose interrupted or failed run may still have created a pane.
+ */
 export async function runHerdr(
 	host: HerdrHost,
 	args: readonly string[],
-	options: { cwd: string; timeoutMs: number; stage: string; signal?: AbortSignal },
+	options: { cwd: string; timeoutMs: number; stage: string; signal?: AbortSignal; isCreate?: boolean },
 ): Promise<HerdrEnvelope> {
-	const { stage, signal } = options;
-	const isCreate = stage === "layout create";
+	const { stage, signal, isCreate = false } = options;
 	let ran: RunResult;
 	try {
 		ran = await host.run([host.herdrBinary, ...args], { cwd: options.cwd, timeoutMs: options.timeoutMs, signal });

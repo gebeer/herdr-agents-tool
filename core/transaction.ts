@@ -157,7 +157,7 @@ export async function startInNewLocation(
 	let owned: OwnedLocation;
 	try {
 		const created = await runHerdr(host, createArgs(request, cwd, launch.env), {
-			cwd, signal, timeoutMs: CREATE_TIMEOUT_MS, stage: "layout create",
+			cwd, signal, timeoutMs: CREATE_TIMEOUT_MS, stage: "layout create", isCreate: true,
 		});
 		owned = parseCreatedLocation(request.placement, created.result);
 		if (created.lateCompletion) {
