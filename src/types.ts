@@ -1,13 +1,14 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { RequestedThinking } from "../protocol/model-config.js";
 
-export const TOOL_NAME = "herdr_start_agent";
-export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export { THINKING_LEVELS, type RequestedThinking } from "../protocol/model-config.js";
+export { PI_SPAWN_TOOL as TOOL_NAME } from "../protocol/pi-child.js";
+
 export const PLACEMENTS = ["pane", "tab", "workspace"] as const;
 export const DIRECTIONS = ["right", "down"] as const;
 
 export type Placement = (typeof PLACEMENTS)[number];
 export type Direction = (typeof DIRECTIONS)[number];
-export type RequestedThinking = (typeof THINKING_LEVELS)[number];
 
 export interface HerdrStartAgentInput {
 	name: string;

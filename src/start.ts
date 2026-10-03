@@ -4,13 +4,25 @@ import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+	DEFAULT_MODEL_CONFIG,
+	MODEL_CONFIG_FILE,
+	ModelConfigError,
+	expandModelAlias,
+	mergeModelConfig,
+	parseCanonicalModel,
+	parseModelConfig,
+	resolveModelProfile,
+	type ModelConfig,
+	type ModelProfile,
+} from "../protocol/model-config.js";
+import { piChildArgv } from "../protocol/pi-child.js";
 import { verifyChildProfile } from "./child-profile.js";
 import { requirePaneCloseSuccess, resolveHerdrBinary, runHerdr } from "./herdr-cli.js";
 import {
 	DIRECTIONS,
 	PLACEMENTS,
 	THINKING_LEVELS,
-	TOOL_NAME,
 	type Direction,
 	type HerdrStartAgentInput,
 	type OwnedLocation,
@@ -21,6 +33,8 @@ import {
 	type StartResultDetails,
 } from "./types.js";
 
+export { expandModelAlias, resolveModelProfile, type ModelConfig, type ModelProfile } from "../protocol/model-config.js";
+
 const NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 const CREATE_TIMEOUT_MS = 10_000;
 const START_TIMEOUT_MS = 35_000;
@@ -28,27 +42,6 @@ const PROMPT_TIMEOUT_MS = 10_000;
 const HERDR_READY_TIMEOUT_MS = 30_000;
 const COMPENSATION_TIMEOUT_MS = 5_000;
 const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
-const CONFIG_FILE = "herdr-agents.json";
-const ALIAS_PATTERN = /^[a-z][a-z0-9_-]*$/;
-
-export type ModelProfile = {
-	model: string;
-	thinking: RequestedThinking;
-};
-
-export type ModelConfig = {
-	fallback: ModelProfile;
-	aliases: Record<string, ModelProfile>;
-};
-
-const DEFAULT_MODEL_CONFIG: ModelConfig = {
-	fallback: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
-	aliases: {
-		sol: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
-		terra: { model: "openai-codex/gpt-5.6-terra", thinking: "medium" },
-		luna: { model: "openai-codex/gpt-5.6-luna", thinking: "medium" },
-	},
-};
 
 type JsonRecord = Record<string, unknown>;
 
@@ -107,87 +100,19 @@ function canonicalModelString(model: Model<any>): string {
 	return `${model.provider}/${model.id}`;
 }
 
-function parseCanonicalModel(input: string): { provider: string; id: string } | undefined {
-	if (input !== input.trim() || /\s/.test(input)) return undefined;
-	const slash = input.indexOf("/");
-	if (slash < 1 || slash === input.length - 1) return undefined;
-	const provider = input.slice(0, slash);
-	const id = input.slice(slash + 1);
-	if (!/^[a-z0-9][a-z0-9._-]*$/i.test(provider) || !id || /[*?\[\]{}]/.test(id)) return undefined;
-	return { provider, id };
-}
-
-function modelProfile(value: unknown, label: string): ModelProfile {
-	const profile = record(value);
-	if (!profile || Object.keys(profile).some((key) => key !== "model" && key !== "thinking")) {
-		throw new StartAgentError("validation", `invalid ${label}: expected model and thinking`);
-	}
-	if (typeof profile.model !== "string" || !parseCanonicalModel(profile.model)) {
-		throw new StartAgentError("validation", `invalid ${label}.model: use one exact provider/model-id`);
-	}
-	if (typeof profile.thinking !== "string" || !THINKING_LEVELS.includes(profile.thinking as RequestedThinking)) {
-		throw new StartAgentError("validation", `invalid ${label}.thinking`);
-	}
-	return { model: profile.model, thinking: profile.thinking as RequestedThinking };
-}
-
 function readModelConfig(path: string): Partial<ModelConfig> {
 	if (!existsSync(path)) return {};
-	let parsed: unknown;
 	try {
-		parsed = JSON.parse(readFileSync(path, "utf8"));
+		return parseModelConfig(JSON.parse(readFileSync(path, "utf8")), path);
 	} catch (error) {
+		if (error instanceof ModelConfigError) throw new StartAgentError("validation", error.message);
 		throw new StartAgentError("validation", `invalid config ${path}: ${error instanceof Error ? error.message : error}`);
 	}
-	const source = record(parsed);
-	if (!source || Object.keys(source).some((key) => key !== "fallback" && key !== "aliases")) {
-		throw new StartAgentError("validation", `invalid config ${path}: expected fallback and aliases`);
-	}
-	const config: Partial<ModelConfig> = {};
-	if (source.fallback !== undefined) config.fallback = modelProfile(source.fallback, `${path} fallback`);
-	if (source.aliases !== undefined) {
-		const aliases = record(source.aliases);
-		if (!aliases) throw new StartAgentError("validation", `invalid ${path} aliases: expected an object`);
-		config.aliases = {};
-		for (const [name, profile] of Object.entries(aliases)) {
-			if (!ALIAS_PATTERN.test(name)) throw new StartAgentError("validation", `invalid ${path} alias: ${name}`);
-			config.aliases[name] = modelProfile(profile, `${path} alias ${name}`);
-		}
-	}
-	return config;
 }
 
 export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir = getAgentDir()): ModelConfig {
-	let config: ModelConfig = {
-		fallback: { ...DEFAULT_MODEL_CONFIG.fallback },
-		aliases: { ...DEFAULT_MODEL_CONFIG.aliases },
-	};
-	for (const path of [join(agentDir, CONFIG_FILE), ...(projectTrusted ? [join(cwd, CONFIG_DIR_NAME, CONFIG_FILE)] : [])]) {
-		const override = readModelConfig(path);
-		config = {
-			fallback: override.fallback ?? config.fallback,
-			aliases: { ...config.aliases, ...override.aliases },
-		};
-	}
-	return config;
-}
-
-export function expandModelAlias(requested: string, aliases = DEFAULT_MODEL_CONFIG.aliases): string {
-	return Object.hasOwn(aliases, requested) ? aliases[requested]!.model : requested;
-}
-
-export function resolveModelProfile(
-	config: ModelConfig,
-	requestedModel: string | undefined,
-	requestedThinking: RequestedThinking | undefined,
-): ModelProfile {
-	const configured = requestedModel !== undefined && Object.hasOwn(config.aliases, requestedModel)
-		? config.aliases[requestedModel]!
-		: config.fallback;
-	return {
-		model: requestedModel === undefined ? config.fallback.model : expandModelAlias(requestedModel, config.aliases),
-		thinking: requestedThinking ?? configured.thinking,
-	};
+	const paths = [join(agentDir, MODEL_CONFIG_FILE), ...(projectTrusted ? [join(cwd, CONFIG_DIR_NAME, MODEL_CONFIG_FILE)] : [])];
+	return mergeModelConfig(paths.map(readModelConfig));
 }
 
 export function selectModel(ctx: ExtensionContext, requested: string, aliases = DEFAULT_MODEL_CONFIG.aliases): Model<any> {
@@ -411,13 +336,10 @@ function createArgs(
 }
 
 function expectedPiArgv(name: string, profile: SelectedProfile, parentPane: string): string[] {
-	return [
-		"--name", name, "--model", profile.model, "--thinking", profile.thinking,
-		"--exclude-tools", TOOL_NAME,
-		"--extension", fileURLToPath(new URL("./child-notify.ts", import.meta.url)),
-		"--herdr-parent-pane", parentPane,
-		"--append-system-prompt", `You are a subagent. Do not spawn additional subagents. Your orchestrator is in Herdr pane ${parentPane}. Automatic completion reporting is installed; do not send a separate completion notification.`,
-	];
+	return piChildArgv({
+		name, model: profile.model, thinking: profile.thinking, parentPane,
+		notifierPath: fileURLToPath(new URL("./child-notify.ts", import.meta.url)),
+	});
 }
 
 function sameArgv(actual: unknown, expected: string[]): boolean {

@@ -5,7 +5,7 @@ export async function childNotifyChecks(): Promise<void> {
 	const previousEnv = process.env.HERDR_ENV;
 	process.env.HERDR_ENV = "1";
 	try {
-		for (const outcome of ["stop", "aborted", "error", "transport", "wrong-target", "long", "empty"]) {
+		for (const outcome of ["stop", "aborted", "error", "transport", "wrong-target", "claude-parent", "long", "empty"]) {
 			const handlers: Record<string, (...args: any[]) => any> = {};
 			const calls: string[][] = [];
 			const notices: string[] = [];
@@ -20,7 +20,7 @@ export async function childNotifyChecks(): Promise<void> {
 					assert.deepEqual(args.slice(0, 3), ["agent", "prompt", "w-test:orchestrator"]);
 					if (outcome === "transport") throw new Error("offline");
 					return { code: 0, killed: false, stderr: "", stdout: JSON.stringify({ id: "notify", result: {
-						type: "agent_prompted", agent: { pane_id: outcome === "wrong-target" ? "other" : "w-test:orchestrator", agent: "pi" },
+						type: "agent_prompted", agent: { pane_id: outcome === "wrong-target" ? "other" : "w-test:orchestrator", agent: outcome === "claude-parent" ? "claude" : "pi" },
 					} }) };
 				},
 			} as never);

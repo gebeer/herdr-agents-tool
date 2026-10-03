@@ -1,5 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { formatSubagentReport, isReportAcknowledged, processCleanupCommand } from "../protocol/report.js";
 import { resolveHerdrBinary, runHerdr } from "./herdr-cli.js";
 
 /** Explicitly loaded in children, never registered as a package entry point. */
@@ -32,15 +33,13 @@ export default function childNotify(pi: ExtensionAPI): void {
 			}
 			const status = message?.stopReason ?? "no final response";
 			const text = message?.content.filter((part) => part.type === "text").map((part) => part.text).join("\n") ?? "";
-			const body = text.length > 16_000 ? `${text.slice(0, 16_000)}\n[Truncated; full response remains in the child session.]` : text;
-			const sender = JSON.stringify({ name: pi.getSessionName(), pane });
-			// Herdr can concatenate concurrent pastes. Frame each report independently.
-			const report = `\n[Subagent report ${sender}; ${status}]\nNEXT ACTION — After reviewing this report:\nSend a follow-up if more work is needed; otherwise close this agent.\nFollow-up: herdr agent prompt ${pane} "<task>"\nSafe Cleanup: kill -TERM ${process.pid} && timeout 10s tail --pid=${process.pid} -f /dev/null && herdr pane close ${pane}\n\n${body || "(No response text.)"}\n[End subagent report]\n`;
+			const report = formatSubagentReport({
+				name: pi.getSessionName(), pane, status, text, cleanup: processCleanupCommand(process.pid, pane),
+			});
 			const response = await runHerdr(pi, resolveHerdrBinary(), ["agent", "prompt", parent, report], {
 				cwd: ctx.cwd, timeout: 10_000, stage: "completion notification",
 			});
-			const agent = response.result.agent as { pane_id?: string; agent?: string } | undefined;
-			if (response.result.type !== "agent_prompted" || agent?.pane_id !== parent || agent.agent !== "pi") {
+			if (!isReportAcknowledged(response.result, parent)) {
 				throw new Error("malformed or mismatched notification acknowledgement");
 			}
 		} catch (error) {
