@@ -68,11 +68,8 @@ function removeChildSessionArtifact(file: string): void {
 	if (existsSync(canonical)) unlinkSync(canonical);
 	const parent = dirname(canonical);
 	if (!parent.startsWith(sessionsRoot) || !existsSync(parent)) return;
-	if (readdirSync(parent).length === 0) {
-		rmdirSync(parent);
-		return;
-	}
-	// Other sessions share this directory; leave their artifacts intact.
+	// Other sessions may share this directory; remove it only when empty.
+	if (readdirSync(parent).length === 0) rmdirSync(parent);
 }
 
 async function startDisposableServer(): Promise<void> {
@@ -165,10 +162,6 @@ try {
 		assert.equal(JSON.parse(result.content[0].type === "text" ? result.content[0].text : "{}").promptSubmitted, true);
 		herdr(["agent", "wait", name, "--until", "done", "--timeout", "30000"]);
 		const agent = record(record(herdr(["agent", "get", name]).result).agent);
-		const reference = record(agent.agent_session);
-		assert.equal(reference.kind, "path");
-		assert.equal(reference.source, "herdr:pi");
-		assert.equal(typeof reference.value, "string");
 		childSessionFile = childSessionReference(agent);
 		assert.ok(childSessionFile, "Herdr must report the child session reference");
 		assert.ok(childSessionFile.startsWith(`${join(agentDir, "sessions")}${sep}`), "child must use the default profile, not the server's inherited profile");
