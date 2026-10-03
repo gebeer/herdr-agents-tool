@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { StartAgentError, type SelectedProfile } from "./types.js";
+import { StartAgentError } from "../core/errors.js";
+import { record } from "../core/herdr.js";
+import type { SelectedProfile } from "./types.js";
 
 const PROFILE_CHECK_TIMEOUT_MS = 15_000;
 
@@ -10,16 +12,7 @@ type ChildProcessResult = {
 	killed: boolean;
 };
 
-export type ChildProfileRunner = (
-	command: string,
-	args: string[],
-	options: { cwd: string; signal?: AbortSignal; timeout: number },
-) => Promise<ChildProcessResult>;
-
-export type ChildProfileCheckOptions = {
-	runner?: ChildProfileRunner;
-	runtimeUrls?: { codingAgent: string; ai: string };
-};
+type RuntimeUrls = { codingAgent: string; ai: string };
 
 const CHILD_PROFILE_CHECK = String.raw`
 const [agentDir, cwd, expectedModel, expectedThinking, codingAgentUrl, aiUrl] = process.argv.slice(1);
@@ -140,16 +133,17 @@ function parseProfileCheck(stdout: string): ProfileCheckResult | undefined {
 	const line = stdout.trimEnd().split("\n").at(-1);
 	if (!line) return undefined;
 	try {
-		const value: unknown = JSON.parse(line);
-		return value !== null && typeof value === "object" && !Array.isArray(value)
-			? (value as ProfileCheckResult)
-			: undefined;
+		return record(JSON.parse(line)) as ProfileCheckResult | undefined;
 	} catch {
 		return undefined;
 	}
 }
 
-export const spawnChildProfileCheck: ChildProfileRunner = (command, args, options) => new Promise((resolve, reject) => {
+const spawnChildProfileCheck = (
+	command: string,
+	args: string[],
+	options: { cwd: string; signal?: AbortSignal; timeout: number },
+) => new Promise<ChildProcessResult>((resolve, reject) => {
 	if (options.signal?.aborted) {
 		resolve({ stdout: "", stderr: "", code: 1, killed: true });
 		return;
@@ -188,7 +182,7 @@ export const spawnChildProfileCheck: ChildProfileRunner = (command, args, option
 	});
 });
 
-function defaultRuntimeUrls(): { codingAgent: string; ai: string } {
+function defaultRuntimeUrls(): RuntimeUrls {
 	try {
 		return {
 			codingAgent: import.meta.resolve("@earendil-works/pi-coding-agent"),
@@ -205,12 +199,11 @@ export async function verifyChildProfile(
 	childAgentDir: string,
 	cwd: string,
 	signal: AbortSignal | undefined,
-	options: ChildProfileCheckOptions = {},
+	runtimeUrls: RuntimeUrls = defaultRuntimeUrls(),
 ): Promise<void> {
-	const runtimeUrls = options.runtimeUrls ?? defaultRuntimeUrls();
 	let result: ChildProcessResult;
 	try {
-		result = await (options.runner ?? spawnChildProfileCheck)(process.execPath, [
+		result = await spawnChildProfileCheck(process.execPath, [
 			"--input-type=module", "--eval", CHILD_PROFILE_CHECK,
 			childAgentDir, cwd, profile.model, profile.thinking, runtimeUrls.codingAgent, runtimeUrls.ai,
 		], { cwd, signal, timeout: PROFILE_CHECK_TIMEOUT_MS });

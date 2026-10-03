@@ -4,12 +4,15 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { StartAgentError } from "../core/errors.js";
+import { runHerdr } from "../core/herdr.js";
+import { resolveModelProfile, type ModelConfig } from "../protocol/model-config.js";
 import { verifyChildProfile } from "../src/child-profile.js";
+import { piHerdrHost } from "../src/herdr-cli.js";
+import { loadModelConfig, selectModel, selectProfileFromConfig, startHerdrPiAgent } from "../src/start.js";
+import type { SelectedProfile } from "../src/types.js";
 import { childNotifyChecks } from "./child-notify.js";
 import { claudeModChecks } from "./claude-mod.js";
-import { runHerdr } from "../src/herdr-cli.js";
-import { loadModelConfig, resolveModelProfile, selectModel, selectProfileFromConfig, startHerdrPiAgent, type ModelConfig } from "../src/start.js";
-import { StartAgentError, type SelectedProfile } from "../src/types.js";
 
 const previousPane = process.env.HERDR_PANE_ID;
 process.env.HERDR_PANE_ID = "w-test:parent";
@@ -65,6 +68,7 @@ export const resolveCliModel = ({ cliModel, modelRuntime }) => {
 };
 `);
 writeFileSync(fakeAiRuntime, `export const getSupportedThinkingLevels = () => ["off", "minimal", "low", "medium", "high", "xhigh", "max"];\n`);
+const fakeRuntimeUrls = { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href };
 
 function writeCredential(credential: unknown): void {
 	writeFileSync(join(root, "auth.json"), JSON.stringify({ test: credential }));
@@ -194,7 +198,7 @@ async function profileFallbackChecks(): Promise<void> {
 		{ name: "fallbackfailure", placement: "workspace", model: "requested" },
 		undefined,
 		{ cwd: root } as never,
-		{ selectProfile: bothFailed },
+		bothFailed,
 	), "requested profile test/requested (medium) failed: requested preflight; fallback profile test/fallback (medium) failed: fallback preflight");
 	assert.equal(layoutCalls, 0, "both profile failures must happen before layout mutation");
 }
@@ -246,42 +250,31 @@ async function commandAuthCheck(): Promise<void> {
 
 async function childProfileChecks(): Promise<void> {
 	writeCredential({ type: "oauth", access: "old", refresh: "refresh-ok", expires: Date.now() - 1 });
-	await verifyChildProfile(profile, root, root, undefined, {
-		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
-	});
+	await verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls);
 
 	writeCredential({ type: "oauth", access: "", refresh: "refresh-ok", expires: Date.now() + 60_000 });
-	await expectReject(() => verifyChildProfile(profile, root, root, undefined, {
-		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
-	}), "stored literal API key or OAuth credential");
+	await expectReject(() => verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls), "stored literal API key or OAuth credential");
 
 	writeCredential({ type: "oauth", access: "old", refresh: "refresh-fails", expires: Date.now() - 1 });
-	await expectReject(() => verifyChildProfile(profile, root, root, undefined, {
-		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
-	}), "refresh failed");
+	await expectReject(() => verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls), "refresh failed");
 
 	writeCredential({ type: "oauth", access: "valid", refresh: "refresh-unused", expires: Date.now() + 3_600_000 });
-	await verifyChildProfile(profile, root, root, undefined, {
-		runtimeUrls: { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href },
-	});
+	await verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls);
 }
 
 async function herdrEnvelopeChecks(): Promise<void> {
 	let timeout: number | undefined;
-	const success = await runHerdr({
+	const replying = (stdout: string) => piHerdrHost({
 		exec: async (_command, _args, options) => {
 			timeout = options?.timeout;
-			return { code: 0, killed: false, stderr: "", stdout: JSON.stringify({ id: "rpc-1", result: { type: "ok" } }) };
+			return { code: 0, killed: false, stderr: "", stdout };
 		},
-	}, "/not-run", [], { cwd: root, timeout: 100, stage: "compensation" });
+	}, "/not-run");
+	const success = await runHerdr(replying(JSON.stringify({ id: "rpc-1", result: { type: "ok" } })), [], { cwd: root, timeoutMs: 100, stage: "compensation" });
 	assert.equal(timeout, 100, "runner must receive the bounded deadline");
 	assert.equal(success.result.type, "ok");
-	await expectReject(() => runHerdr({
-		exec: async () => ({ code: 0, killed: false, stderr: "", stdout: JSON.stringify({ result: { type: "ok" } }) }),
-	}, "/not-run", [], { cwd: root, timeout: 100, stage: "compensation" }), "malformed Herdr response envelope");
-	await expectReject(() => runHerdr({
-		exec: async () => ({ code: 0, killed: false, stderr: "", stdout: "{}" }),
-	}, "/not-run", [], { cwd: root, timeout: 100, stage: "layout create" }), "malformed Herdr response envelope");
+	await expectReject(() => runHerdr(replying(JSON.stringify({ result: { type: "ok" } })), [], { cwd: root, timeoutMs: 100, stage: "compensation" }), "malformed Herdr response envelope");
+	await expectReject(() => runHerdr(replying("{}"), [], { cwd: root, timeoutMs: 100, stage: "layout create" }), "malformed Herdr response envelope");
 }
 
 async function inputValidationChecks(): Promise<void> {
@@ -340,7 +333,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 				});
 			},
 		};
-		const started = await startHerdrPiAgent(pi as never, scenario.input as never, undefined, { cwd: root } as never, { selectProfile });
+		const started = await startHerdrPiAgent(pi as never, scenario.input as never, undefined, { cwd: root } as never, selectProfile);
 		assert.deepEqual(calls[0]?.args, [...scenario.createArgs, "--env", `PI_CODING_AGENT_DIR=${join(homedir(), ".pi", "agent")}`]);
 		assert.equal(calls[0]?.timeout, 10_000);
 		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
@@ -380,7 +373,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 		{ name: "fallbackcheck", placement: "pane", model: "missing", thinking: "high" },
 		undefined,
 		{ cwd: root } as never,
-		{ selectProfile: async () => fallbackProfile },
+		async () => fallbackProfile,
 	);
 	assert.deepEqual(JSON.parse(fallbackStarted.text).fallback, fallbackProfile.fallback);
 	assert.deepEqual(fallbackStarted.details.fallback, fallbackProfile.fallback);
@@ -401,7 +394,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			return herdrResponse({ type: "pane_info" });
 		},
 	};
-	await expectReject(() => startHerdrPiAgent(pi as never, { name: "cleanupcheck", placement: "workspace" } as never, outer.signal, { cwd: root } as never, { selectProfile }), "agent startup: aborted; compensation failed for pane w9:p1: compensation: malformed Herdr response: expected ok");
+	await expectReject(() => startHerdrPiAgent(pi as never, { name: "cleanupcheck", placement: "workspace" } as never, outer.signal, { cwd: root } as never, selectProfile), "agent startup: aborted; compensation failed for pane w9:p1: compensation: malformed Herdr response: expected ok");
 	assert.deepEqual(calls[2]?.args, ["pane", "close", "w9:p1"]);
 	assert.equal(calls[2]?.signal, undefined, "compensation must not take the aborted caller signal");
 
@@ -424,7 +417,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			return herdrResponse({ type: "ok" });
 		},
 	};
-	await expectReject(() => startHerdrPiAgent(latePi as never, { name: "lateabort", placement: "workspace" } as never, lateAbort.signal, { cwd: root } as never, { selectProfile }), "layout create: aborted; compensation closed created pane");
+	await expectReject(() => startHerdrPiAgent(latePi as never, { name: "lateabort", placement: "workspace" } as never, lateAbort.signal, { cwd: root } as never, selectProfile), "layout create: aborted; compensation closed created pane");
 	assert.deepEqual(lateCalls, [
 		["workspace", "create", "--cwd", root, "--label", "lateabort", "--no-focus", "--env", `PI_CODING_AGENT_DIR=${join(homedir(), ".pi", "agent")}`],
 		["pane", "close", "w8:p1"],
@@ -437,7 +430,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			return herdrResponse({ type: "workspace_created", workspace: { workspace_id: "w3" }, tab: { tab_id: "w3:t1" }, root_pane: {} });
 		},
 	};
-	await expectReject(() => startHerdrPiAgent(uncertainPi as never, { name: "uncertaincheck", placement: "workspace" } as never, undefined, { cwd: root } as never, { selectProfile }), "creation outcome is uncertain and no pane was closed");
+	await expectReject(() => startHerdrPiAgent(uncertainPi as never, { name: "uncertaincheck", placement: "workspace" } as never, undefined, { cwd: root } as never, selectProfile), "creation outcome is uncertain and no pane was closed");
 	assert.equal(uncertainCalls.length, 1, "uncertain ownership must not attempt cleanup");
 }
 
@@ -461,7 +454,7 @@ async function claudeKindChecks(): Promise<void> {
 				});
 			},
 		};
-		const started = await startHerdrPiAgent(pi as never, { ...scenario.input, kind: "claude", placement: "pane" } as never, undefined, { cwd: root } as never, { selectProfile });
+		const started = await startHerdrPiAgent(pi as never, { ...scenario.input, kind: "claude", placement: "pane" } as never, undefined, { cwd: root } as never, selectProfile);
 		assert.deepEqual(calls[0], [
 			"pane", "split", "--current", "--direction", "right", "--cwd", root, "--no-focus",
 			"--env", "HERDR_AGENTS_PARENT_PANE=w-test:parent", "--env", `HERDR_AGENTS_NAME=${scenario.input.name}`,
@@ -484,7 +477,7 @@ async function claudeKindChecks(): Promise<void> {
 		[{ name: "claudebad", kind: "claude", model: "bad model" }, "invalid model for claude"],
 	] as const) {
 		await assert.rejects(
-			() => startHerdrPiAgent(pi, input as never, undefined, { cwd: root } as never, { selectProfile }),
+			() => startHerdrPiAgent(pi, input as never, undefined, { cwd: root } as never, selectProfile),
 			(error: unknown) => error instanceof StartAgentError && error.kind === "validation" && error.message.includes(message),
 		);
 	}
@@ -526,7 +519,7 @@ async function promptChecks(): Promise<void> {
 				};
 			},
 		};
-		const run = () => startHerdrPiAgent(pi, { name: agent.name, placement: "pane", prompt }, controller.signal, { cwd: root } as never, { selectProfile: async () => profile });
+		const run = () => startHerdrPiAgent(pi, { name: agent.name, placement: "pane", prompt }, controller.signal, { cwd: root } as never, async () => profile);
 		if (scenario === "success") {
 			const result = await run();
 			assert.equal(result.details.promptSubmitted, true);

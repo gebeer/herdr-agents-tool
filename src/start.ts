@@ -4,8 +4,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { StartAgentError } from "../core/errors.js";
 import { herdrId } from "../core/herdr.js";
-import { oneOf, resolveCwd, validateStartRequest, type StartRequest } from "../core/request.js";
+import { AGENT_KINDS, oneOf, resolveCwd, validateStartRequest, type StartRequest } from "../core/request.js";
 import { startInNewLocation, type Launch } from "../core/transaction.js";
 import { claudeChildLaunch } from "../protocol/claude-child.js";
 import {
@@ -19,20 +20,12 @@ import {
 	resolveModelProfile,
 	type ModelConfig,
 	type ModelProfile,
+	type RequestedThinking,
 } from "../protocol/model-config.js";
 import { piChildArgv } from "../protocol/pi-child.js";
 import { verifyChildProfile } from "./child-profile.js";
 import { piHerdrHost, resolveHerdrBinary } from "./herdr-cli.js";
-import {
-	AGENT_KINDS,
-	type HerdrStartAgentInput,
-	type RequestedThinking,
-	type SelectedProfile,
-	StartAgentError,
-	type StartResultDetails,
-} from "./types.js";
-
-export { expandModelAlias, resolveModelProfile, type ModelConfig, type ModelProfile } from "../protocol/model-config.js";
+import type { SelectedProfile, StartResultDetails } from "./types.js";
 
 const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
 // The repo root, which is also the Claude Code plugin Claude children load.
@@ -80,13 +73,11 @@ export function selectModel(ctx: ExtensionContext, requested: string, aliases = 
 }
 
 function selectThinking(model: Model<any>, thinking: RequestedThinking): RequestedThinking {
-	if (!getSupportedThinkingLevels(model).includes(thinking as never)) {
+	if (!getSupportedThinkingLevels(model).includes(thinking)) {
 		throw new StartAgentError("validation", `unsupported thinking level for ${canonicalModelString(model)}`);
 	}
 	return thinking;
 }
-
-type VerifyProfile = typeof verifyChildProfile;
 
 export async function selectProfileFromConfig(
 	ctx: ExtensionContext,
@@ -95,7 +86,7 @@ export async function selectProfileFromConfig(
 	requestedThinking: RequestedThinking | undefined,
 	cwd: string,
 	signal: AbortSignal | undefined,
-	verifyProfile: VerifyProfile = verifyChildProfile,
+	verifyProfile: typeof verifyChildProfile = verifyChildProfile,
 ): Promise<SelectedProfile> {
 	const check = async (candidate: ModelProfile): Promise<SelectedProfile> => {
 		const model = selectModel(ctx, candidate.model, config.aliases);
@@ -150,36 +141,16 @@ export async function selectProfileFromConfig(
 	}
 }
 
-export function selectProfile(
+function selectProfile(
 	ctx: ExtensionContext,
 	requestedModel: string | undefined,
 	requestedThinking: RequestedThinking | undefined,
 	cwd: string,
 	signal: AbortSignal | undefined,
-	verifyProfile: VerifyProfile = verifyChildProfile,
 ): Promise<SelectedProfile> {
-	return selectProfileFromConfig(
-		ctx,
-		// Trust is evaluated for the orchestrator's project, so that is where project config comes from.
-		loadModelConfig(ctx.cwd, ctx.isProjectTrusted()),
-		requestedModel,
-		requestedThinking,
-		cwd,
-		signal,
-		verifyProfile,
-	);
+	// Trust is evaluated for the orchestrator's project, so that is where project config comes from.
+	return selectProfileFromConfig(ctx, loadModelConfig(ctx.cwd, ctx.isProjectTrusted()), requestedModel, requestedThinking, cwd, signal);
 }
-
-export type StartHerdrPiAgentDependencies = {
-	selectProfile?: (
-		ctx: ExtensionContext,
-		requestedModel: string | undefined,
-		requestedThinking: RequestedThinking | undefined,
-		cwd: string,
-		signal: AbortSignal | undefined,
-	) => Promise<SelectedProfile>;
-	verifyProfile?: VerifyProfile;
-};
 
 function expectedPiArgv(name: string, profile: SelectedProfile, parentPane: string): string[] {
 	return piChildArgv({
@@ -200,10 +171,10 @@ function claudeLaunch(request: StartRequest, parentPane: string) {
 /** Pi's start tool: pi profile selection and preflight (pi children only), then the shared Herdr transaction. */
 export async function startHerdrPiAgent(
 	pi: Pick<ExtensionAPI, "exec">,
-	input: HerdrStartAgentInput,
+	input: Record<string, unknown>,
 	signal: AbortSignal | undefined,
 	ctx: ExtensionContext,
-	dependencies: StartHerdrPiAgentDependencies = {},
+	select: typeof selectProfile = selectProfile,
 ): Promise<{ text: string; details: StartResultDetails }> {
 	const { kind: rawKind, ...shared } = input;
 	const kind = oneOf(AGENT_KINDS, rawKind, "kind") ?? "pi";
@@ -216,9 +187,7 @@ export async function startHerdrPiAgent(
 	if (kind === "claude") {
 		launch = claudeLaunch(request, parentPane);
 	} else {
-		profile = dependencies.selectProfile
-			? await dependencies.selectProfile(ctx, request.model, request.thinking, cwd, signal)
-			: await selectProfile(ctx, request.model, request.thinking, cwd, signal, dependencies.verifyProfile);
+		profile = await select(ctx, request.model, request.thinking, cwd, signal);
 		launch = { kind: "pi", argv: expectedPiArgv(request.name, profile, parentPane), env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } };
 	}
 	const started = await startInNewLocation(piHerdrHost(pi, resolveHerdrBinary()), request, cwd, launch, signal);

@@ -1,8 +1,8 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { herdrId } from "../core/herdr.js";
+import { herdrId, runHerdr } from "../core/herdr.js";
 import { formatSubagentReport, isReportAcknowledged, processCleanupCommand } from "../protocol/report.js";
-import { resolveHerdrBinary, runHerdr } from "./herdr-cli.js";
+import { piHerdrHost, resolveHerdrBinary } from "./herdr-cli.js";
 
 /** Explicitly loaded in children, never registered as a package entry point. */
 export default function childNotify(pi: ExtensionAPI): void {
@@ -37,8 +37,8 @@ export default function childNotify(pi: ExtensionAPI): void {
 			const report = formatSubagentReport({
 				name: pi.getSessionName(), pane, status, text, cleanup: processCleanupCommand(process.pid, pane),
 			});
-			const response = await runHerdr(pi, resolveHerdrBinary(), ["agent", "prompt", parent, report], {
-				cwd: ctx.cwd, timeout: 10_000, stage: "completion notification",
+			const response = await runHerdr(piHerdrHost(pi, resolveHerdrBinary()), ["agent", "prompt", parent, report], {
+				cwd: ctx.cwd, timeoutMs: 10_000, stage: "completion notification",
 			});
 			if (!isReportAcknowledged(response.result, parent)) {
 				throw new Error("malformed or mismatched notification acknowledgement");

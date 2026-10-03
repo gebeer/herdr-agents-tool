@@ -1,27 +1,8 @@
-import type { ThinkingLevel } from "@earendil-works/pi-ai";
-import type { AgentKind, Direction, Placement } from "../core/request.js";
 import type { RequestedThinking } from "../protocol/model-config.js";
-
-export { StartAgentError } from "../core/errors.js";
-export { AGENT_KINDS, DIRECTIONS, PLACEMENTS, type AgentKind, type Direction, type Placement } from "../core/request.js";
-export { THINKING_LEVELS, type RequestedThinking } from "../protocol/model-config.js";
-export { PI_SPAWN_TOOL as TOOL_NAME } from "../protocol/pi-child.js";
-
-export interface HerdrStartAgentInput {
-	name: string;
-	kind?: AgentKind;
-	placement?: Placement;
-	workspace?: string;
-	direction?: Direction;
-	cwd?: string;
-	model?: string;
-	thinking?: RequestedThinking;
-	prompt?: string;
-}
 
 export interface ProfileDescription {
 	model?: string;
-	thinking?: ThinkingLevel | "off";
+	thinking?: RequestedThinking;
 }
 
 export interface FallbackSelection {
@@ -32,7 +13,7 @@ export interface FallbackSelection {
 
 export interface SelectedProfile {
 	model: string;
-	thinking: ThinkingLevel | "off";
+	thinking: RequestedThinking;
 	fallback?: FallbackSelection;
 }
 
@@ -42,7 +23,7 @@ export interface StartResultDetails {
 	tab?: string;
 	workspace?: string;
 	model?: string;
-	thinking?: ThinkingLevel | "off";
+	thinking?: RequestedThinking;
 	herdr: unknown;
 	fallback?: FallbackSelection;
 	promptSubmitted?: true;

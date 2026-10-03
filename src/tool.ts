@@ -1,8 +1,10 @@
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Type, type Static } from "typebox";
+import { Type } from "typebox";
+import { AGENT_KINDS, DIRECTIONS, PLACEMENTS } from "../core/request.js";
+import { THINKING_LEVELS } from "../protocol/model-config.js";
+import { PI_SPAWN_TOOL } from "../protocol/pi-child.js";
 import { startHerdrPiAgent } from "./start.js";
-import { AGENT_KINDS, DIRECTIONS, PLACEMENTS, THINKING_LEVELS, TOOL_NAME, type HerdrStartAgentInput } from "./types.js";
 
 const schema = Type.Object(
 	{
@@ -19,16 +21,14 @@ const schema = Type.Object(
 	{ additionalProperties: false },
 );
 
-type ToolInput = Static<typeof schema>;
-
 export function registerHerdrStartAgentTool(pi: ExtensionAPI): void {
 	pi.registerTool({
-		name: TOOL_NAME,
+		name: PI_SPAWN_TOOL,
 		label: "Start Herdr Agent",
 		description: "Start one Pi or Claude Code agent in a new Herdr pane, tab, or workspace. In Herdr, use this tool exclusively to start subagents, not other launch tools or direct CLI commands. Include an initial task prompt unless the user explicitly requests an agent without one. This tool does not wait for task completion. The child automatically injects a subagent report into your session; do not poll for results.",
 		parameters: schema,
-		async execute(_toolCallId, input: ToolInput, signal, _onUpdate, ctx) {
-			const started = await startHerdrPiAgent(pi, input as HerdrStartAgentInput, signal, ctx);
+		async execute(_toolCallId, input, signal, _onUpdate, ctx) {
+			const started = await startHerdrPiAgent(pi, input, signal, ctx);
 			return {
 				content: [{ type: "text", text: started.text }],
 				details: started.details,

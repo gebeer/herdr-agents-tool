@@ -11,7 +11,7 @@ import {
 	SessionManager,
 	SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { TOOL_NAME } from "../src/types.js";
+import { PI_SPAWN_TOOL as TOOL_NAME } from "../protocol/pi-child.js";
 
 if (process.env.RUN_HERDR_INTEGRATION !== "1") {
 	console.log("integration skipped (set RUN_HERDR_INTEGRATION=1 for the disposable Herdr flow)");

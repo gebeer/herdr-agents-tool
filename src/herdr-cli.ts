@@ -2,7 +2,7 @@ import { accessSync, constants } from "node:fs";
 import { delimiter, isAbsolute, join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StartAgentError } from "../core/errors.js";
-import { runHerdr as runHerdrOn, type HerdrEnvelope, type HerdrHost } from "../core/herdr.js";
+import type { HerdrHost } from "../core/herdr.js";
 
 function executable(path: string): boolean {
 	try {
@@ -44,16 +44,4 @@ export function piHerdrHost(pi: Pick<ExtensionAPI, "exec">, binary: string): Her
 			};
 		},
 	};
-}
-
-/** Execute one Herdr CLI request through Pi's argument-array API without a shell. */
-export function runHerdr(
-	pi: Pick<ExtensionAPI, "exec">,
-	binary: string,
-	args: string[],
-	options: { cwd: string; signal?: AbortSignal; timeout: number; stage: string },
-): Promise<HerdrEnvelope> {
-	return runHerdrOn(piHerdrHost(pi, binary), args, {
-		cwd: options.cwd, signal: options.signal, timeoutMs: options.timeout, stage: options.stage,
-	});
 }
