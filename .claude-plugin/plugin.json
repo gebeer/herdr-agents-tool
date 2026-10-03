@@ -1,0 +1,6 @@
+{
+  "name": "herdr-agents",
+  "version": "0.1.0",
+  "description": "Start Claude Code or pi agents in new Herdr panes, tabs, or workspaces, with automatic completion reports.",
+  "author": { "name": "gebeer" }
+}

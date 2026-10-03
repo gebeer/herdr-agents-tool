@@ -8,7 +8,7 @@ const schema = Type.Object(
 	{
 		name: Type.String({ description: "Lowercase Herdr agent name." }),
 		prompt: Type.Optional(Type.String({ description: "Initial task for the agent." })),
-		placement: Type.Optional(StringEnum(PLACEMENTS, { description: "Defaults to tab. Use pane only when the user explicitly requests a split pane." })),
+		placement: Type.Optional(StringEnum(PLACEMENTS, { description: "Defaults to tab. Use pane only when the user explicitly requests a split pane; it splits the calling agent's own pane." })),
 		workspace: Type.Optional(Type.String({ description: "Workspace ID for tab placement." })),
 		direction: Type.Optional(StringEnum(DIRECTIONS, { description: "Pane split direction." })),
 		cwd: Type.Optional(Type.String({ description: "Existing directory for the new location." })),

@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { verifyChildProfile } from "../src/child-profile.js";
 import { childNotifyChecks } from "./child-notify.js";
+import { claudeModChecks } from "./claude-mod.js";
 import { requirePaneCloseSuccess, runHerdr } from "../src/herdr-cli.js";
 import { loadModelConfig, resolveModelProfile, selectModel, selectProfileFromConfig, startHerdrPiAgent, type ModelConfig } from "../src/start.js";
 import type { SelectedProfile } from "../src/types.js";
@@ -504,7 +505,8 @@ try {
 	await placementAndCompensationChecks();
 	await promptChecks();
 	await childNotifyChecks();
-	console.log("unit checks passed: child trust/auth, Herdr envelopes, placements, compensation, and runtime input validation");
+	await claudeModChecks();
+	console.log("unit checks passed: child trust/auth, Herdr envelopes, placements, compensation, runtime input validation, and the Claude Code mod core");
 } finally {
 	rmSync(root, { recursive: true, force: true });
 	if (previousPane === undefined) delete process.env.HERDR_PANE_ID;

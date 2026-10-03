@@ -1,0 +1,97 @@
+import {
+  MODEL_CONFIG_FILE,
+  mergeModelConfig,
+  parseCanonicalModel,
+  parseModelConfig,
+  resolveModelProfile,
+  type RequestedThinking,
+} from '../protocol/model-config.ts'
+import { piChildArgv } from '../protocol/pi-child.ts'
+import { AGENT_NAME_ENV, PARENT_PANE_ENV } from './context.ts'
+import type { Host } from './host.ts'
+
+export const AGENT_KINDS = ['claude', 'pi'] as const
+export type AgentKind = (typeof AGENT_KINDS)[number]
+
+export const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'] as const
+export type PermissionMode = (typeof PERMISSION_MODES)[number]
+
+const DEFAULT_PERMISSION_MODE: PermissionMode = 'acceptEdits'
+const CLAUDE_EFFORTS: readonly RequestedThinking[] = ['low', 'medium', 'high', 'xhigh', 'max']
+const CLAUDE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/
+
+export type LaunchRequest = {
+  kind: AgentKind
+  name: string
+  parentPane: string
+  model?: string
+  thinking?: RequestedThinking
+  permissionMode?: PermissionMode
+}
+
+/** How Herdr starts one child: the arguments after its executable, its pane's env, and the profile it got. */
+export type Launch = {
+  kind: AgentKind
+  argv: string[]
+  env: Record<string, string>
+  model?: string
+  thinking?: RequestedThinking
+}
+
+export async function prepareLaunch(host: Host, request: LaunchRequest): Promise<Launch> {
+  return request.kind === 'claude' ? claudeLaunch(host, request) : piLaunch(host, request)
+}
+
+/**
+ * Claude children load this plugin, which finds them by `PARENT_PANE_ENV`, adds its subagent
+ * instructions to their system prompt, and reports on each turn (see child.ts).
+ */
+function claudeLaunch(host: Host, request: LaunchRequest): Launch {
+  const { model, thinking: effort, name, parentPane } = request
+  if (model !== undefined && !CLAUDE_MODEL.test(model)) {
+    throw new Error('invalid model for claude: use a Claude Code model alias or ID, such as opus or sonnet')
+  }
+  if (effort !== undefined && !CLAUDE_EFFORTS.includes(effort)) {
+    throw new Error(`unsupported thinking level for claude: ${effort}; use ${CLAUDE_EFFORTS.join(', ')}`)
+  }
+  const argv = [
+    '--name', name,
+    ...(model === undefined ? [] : ['--model', model]),
+    ...(effort === undefined ? [] : ['--effort', effort]),
+    '--permission-mode', request.permissionMode ?? DEFAULT_PERMISSION_MODE,
+    '--plugin-dir', host.pluginRoot,
+  ]
+  return { kind: 'claude', argv, env: { [PARENT_PANE_ENV]: parentPane, [AGENT_NAME_ENV]: name }, model, thinking: effort }
+}
+
+/**
+ * Pi children use the default pi profile and pi's own completion notifier. Profiles come from
+ * the global `herdr-agents.json` alone: this host cannot check pi's project trust or model registry.
+ */
+async function piLaunch(host: Host, request: LaunchRequest): Promise<Launch> {
+  if (request.permissionMode !== undefined) throw new Error('invalid field combination: permissionMode applies only to claude agents')
+  if (!host.home) throw new Error('invalid environment: HOME is unset')
+  const agentDir = `${host.home}/.pi/agent`
+  const config = mergeModelConfig([await readPiModelConfig(host, `${agentDir}/${MODEL_CONFIG_FILE}`)])
+  const profile = resolveModelProfile(config, request.model, request.thinking)
+  if (!parseCanonicalModel(profile.model)) {
+    throw new Error('invalid model for pi: use one exact provider/model-id or configured alias')
+  }
+  const argv = piChildArgv({
+    name: request.name, model: profile.model, thinking: profile.thinking, parentPane: request.parentPane,
+    notifierPath: `${host.pluginRoot}/src/child-notify.ts`,
+  })
+  return { kind: 'pi', argv, env: { PI_CODING_AGENT_DIR: agentDir }, model: profile.model, thinking: profile.thinking }
+}
+
+async function readPiModelConfig(host: Host, path: string) {
+  const text = await host.readFile(path)
+  if (text === undefined) return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    throw new Error(`invalid config ${path}: ${error instanceof Error ? error.message : error}`)
+  }
+  return parseModelConfig(parsed, path)
+}

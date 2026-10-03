@@ -8,7 +8,9 @@
   "scripts": {
     "test": "bun run test/run.ts",
     "test:integration": "bun run test/integration.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:mod": "claude plugin test .",
+    "typecheck:mod": "tsc -p hooks"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": ">=0.84.2 <0.85.0",

@@ -4,6 +4,8 @@ A deliberately narrow Pi package with one tool: `herdr_start_agent`.
 
 Inside a Herdr-managed Pi pane, it creates one new pane, tab, or workspace without focusing it, then starts one interactive Pi agent there. It accepts an exact registered `provider/model-id` or configured model alias and a thinking level supported by that model. It can submit an optional initial prompt after readiness. It loads a child-only completion notifier. The orchestrator tool does not start in existing panes, monitor children, retain state, or change active-tool selection.
 
+The same repository is also a Claude Code plugin (a mod) that gives a Claude Code orchestrator the same capability for Claude Code and pi children; see [Claude Code mod](#claude-code-mod).
+
 ## Loading
 
 Install the declared Pi runtime peers beside a directly copied package before loading it:
@@ -53,7 +55,7 @@ herdr_start_agent({
 })
 ```
 
-Placement defaults to a new tab in the orchestrator's workspace. Use `placement: "pane"` only when the user explicitly requests a split pane; `direction` then defaults to `"right"`.
+Placement defaults to a new tab in the orchestrator's workspace. Use `placement: "pane"` only when the user explicitly requests a split pane; it splits the orchestrator's own pane, and `direction` then defaults to `"right"`.
 
 `name` must match `[a-z][a-z0-9_-]{0,31}`. A configured alias expands before registry lookup, child-profile preflight, and Herdr launch. An explicit thinking value overrides that alias's default. An exact `provider/model-id` uses the fallback thinking value when thinking is omitted.
 
@@ -81,12 +83,48 @@ Prompt submission is outside startup rollback. On a prompt error, timeout, cance
 
 Before layout mutation, a Pi subprocess checks the default profile with an explicitly untrusted settings manager and all project-local resources disabled, so caller-controlled `.pi` settings, packages, extensions, skills, prompts, themes, and context cannot execute during preflight. The checker requires the exact model, requested thinking level, and usable stored profile-local request auth (including bounded OAuth refresh/auth derivation). It rejects selected-provider/model `models.json` API-key or header values backed by environment interpolation or commands before auth resolution, then requires final auth to derive solely from the validated stored credential. A successful Herdr readiness response still means only that the child is ready for input, not that a provider request has succeeded.
 
+## Claude Code mod
+
+The repository root is also a Claude Code plugin (`.claude-plugin/plugin.json`, `hooks/`). Load it per session, or for every session through `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`:
+
+```bash
+claude --plugin-dir /home/gbr/.pi/extensions/herdr_agents_tool
+```
+
+Like the pi package, it does nothing outside a Herdr pane. One plugin plays two roles, chosen by the pane's environment:
+
+- **Orchestrator**: registers the `start_agent` tool (`mcp__herdr-agents__start_agent`). It runs the same create → start → optional prompt transaction as `herdr_start_agent`, with the same rollback rules: a proven pane is closed once on startup failure, an uncertain create is never guessed at, and a ready agent is never rolled back.
+- **Child**: a Claude Code child launched by the tool loads this plugin with `--plugin-dir`, recognizes itself by `HERDR_AGENTS_PARENT_PANE` (set on its pane through Herdr's `--env`), registers no tool, adds its subagent instructions as a system-prompt section (`prompt.compose`), and sends each finished main-loop turn's answer to the orchestrator with `herdr agent prompt`. Reports use the same framed format as pi children (`protocol/report.ts`); their cleanup command is `herdr pane close <pane>`.
+
+```ts
+start_agent({
+  name: "reviewer",
+  kind: "claude",            // pi (default) | claude
+  model: "opus",             // claude: Claude Code alias or ID; pi: herdr-agents.json alias or provider/model-id
+  thinking: "high",          // claude accepts low | medium | high | xhigh | max (passed as --effort)
+  permissionMode: "acceptEdits", // claude only; the default
+  prompt: "Review the current diff. Report actionable findings only.",
+})
+```
+
+`placement`, `workspace`, `direction`, `cwd`, `name`, and `prompt` behave as in the pi tool. Omitting `model` gives Claude children the user's configured model, and pi children the configured fallback profile.
+
+Pi children are launched with exactly the arguments the pi orchestrator uses (`protocol/pi-child.ts`), including `src/child-notify.ts`. Their profiles come from the global `~/.pi/agent/herdr-agents.json`, parsed by the same rules (`protocol/model-config.ts`). The mod cannot reach pi's model registry, auth, or project trust, so it skips the child-profile preflight, automatic fallback, and project-level configuration: a bad model or missing auth surfaces in the child's pane.
+
+Herdr types the child command into the new pane's shell, so a shell alias or function named `claude` applies to children too: a wrapper that adds `--dangerously-skip-permissions` overrides `permissionMode`. The plugin passes no `--append-system-prompt` (Claude Code keeps only the last one), so a prompt the wrapper appends survives beside the subagent section. A child that also loads this plugin through `CLAUDE_CODE_PLUGIN_DIRS` loads it once, not twice.
+
+`$` (the engine interface) may appear only in `hooks/register.ts`. That file is the imperative shell: it reads the environment and builds a `Host` port (`hooks/host.ts`) for the pure core (`hooks/start.ts`, `hooks/launch.ts`, `hooks/child.ts`, `hooks/herdr.ts`, `hooks/context.ts`). `protocol/` holds the import-free modules both hosts load.
+
 ## Development
 
 ```bash
 bun run typecheck
 bun run test
 RUN_HERDR_INTEGRATION=1 bun run test:integration
+bun run typecheck:mod   # after Claude Code has loaded the plugin once, which lays .claude-plugin/types/
+bun run test:mod
 ```
+
+`bun run test` also covers the mod's pure core against a fake host (`test/claude-mod.ts`); `test:mod` runs `hooks/register.test.ts` against the Claude Code engine to cover the shell's wiring.
 
 The unit contracts use only Bun/Node primitives. The opt-in integration command creates a named disposable Herdr server with a non-default inherited Pi profile, verifies that the child still uses the default profile without changing cwd, loads this package through Pi's SDK resource loader, executes the assembled tool with an initial prompt, and waits separately for its `OK` provider response. It reads the child session reference reported by Herdr to verify the persisted effective model/thinking entries and exact response, verifies that a real parent Pi receives the automatic completion report, then checks cleanup of its panes, generated session files, and named Herdr session metadata.
