@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
-import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { herdrId } from "../core/herdr.js";
 import { resolveCwd, validateStartRequest } from "../core/request.js";
 import { startInNewLocation } from "../core/transaction.js";
@@ -58,7 +58,8 @@ function readModelConfig(path: string): Partial<ModelConfig> {
 	}
 }
 
-export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir = getAgentDir()): ModelConfig {
+/** Children always run on the default profile, so its herdr-agents.json applies even under another orchestrator profile (pi-clawa). */
+export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir = DEFAULT_AGENT_DIR): ModelConfig {
 	const paths = [join(agentDir, MODEL_CONFIG_FILE), ...(projectTrusted ? [join(cwd, CONFIG_DIR_NAME, MODEL_CONFIG_FILE)] : [])];
 	return mergeModelConfig(paths.map(readModelConfig));
 }
@@ -155,7 +156,8 @@ export function selectProfile(
 ): Promise<SelectedProfile> {
 	return selectProfileFromConfig(
 		ctx,
-		loadModelConfig(cwd, ctx.isProjectTrusted()),
+		// Trust is evaluated for the orchestrator's project, so that is where project config comes from.
+		loadModelConfig(ctx.cwd, ctx.isProjectTrusted()),
 		requestedModel,
 		requestedThinking,
 		cwd,

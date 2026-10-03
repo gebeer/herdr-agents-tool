@@ -27,7 +27,7 @@ The package registers nothing unless `HERDR_ENV=1`, `HERDR_PANE_ID`, and `HERDR_
 
 ## Configuration
 
-Model profiles live in `~/.pi/agent/herdr-agents.json`. A trusted project's `.pi/herdr-agents.json` may override the fallback or individual aliases. Each profile contains an exact `provider/model-id` and its default thinking effort:
+Model profiles live in `~/.pi/agent/herdr-agents.json`, also when the orchestrator runs on another Pi profile, because children always use the default profile. The orchestrator's project, when Pi trusts it, may override the fallback or individual aliases in its `.pi/herdr-agents.json`. Each profile contains an exact `provider/model-id` and its default thinking effort:
 
 ```json
 {
