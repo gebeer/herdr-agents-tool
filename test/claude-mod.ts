@@ -166,6 +166,12 @@ async function rollbackChecks(): Promise<void> {
 	const closeFails = fakeHost(herdr({ start: () => "throw", close: () => ok({ type: "nope" }) }));
 	await assert.rejects(startAgent(closeFails, { name: "w" }, ORCHESTRATOR), /agent startup: Herdr transport failure; compensation failed for pane w:p2: compensation: malformed Herdr response: expected ok/);
 
+	// The user interrupts while create runs: $.process.run cannot be cut, so the created pane is closed afterwards.
+	const interrupt = new AbortController();
+	const interrupted = fakeHost(herdr({ create: () => (interrupt.abort(), ok({ type: "tab_created", root_pane: { pane_id: "w:p2" }, tab: { tab_id: "w:t2" } })) }));
+	await assert.rejects(startAgent(interrupted, { name: "w", prompt: "x" }, ORCHESTRATOR, interrupt.signal), /layout create: aborted; compensation closed created pane/);
+	assert.deepEqual(interrupted.calls.map(([noun, verb]) => `${noun} ${verb}`), ["tab create", "pane close"]);
+
 	const uncertain = fakeHost(herdr({ create: () => "throw" }));
 	await assert.rejects(startAgent(uncertain, { name: "w" }, ORCHESTRATOR), /creation outcome is uncertain and no pane was closed/);
 	assert.equal(uncertain.calls.length, 1);

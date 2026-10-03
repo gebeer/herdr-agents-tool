@@ -59,13 +59,13 @@ test('an orchestrator pane gets start_agent and starts a Claude child', async ($
   expect(sections.map(section => section.id)).toEqual(['engine:base'])
 })
 
-test('a failed start reaches the model as an error result', async ($, on) => {
+test('a failed start reaches the model as a deny, its error channel', async ($, on) => {
   host(on, ORCHESTRATOR_ENV)
   on('tool.register', (_$, e) => ({ value: { tool: `mcp__herdr-agents__${e.name}` } }))
   await $.session.start(SESSION)
   const failed = await $.tool.call({ tool: 'mcp__herdr-agents__start_agent', name: 'Bad' })
-  expect(failed.isError).toBe(true)
-  expect(String(failed.text ?? failed.result)).toContain('invalid name')
+  expect(failed.deny).toContain('invalid name')
+  expect(failed.result).toBeUndefined()
 })
 
 test('a child registers no tool, gets subagent instructions, and reports each main-loop turn', async ($, on) => {

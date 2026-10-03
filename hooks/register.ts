@@ -17,14 +17,15 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('tool.call', { tool: START_TOOL_NAME }, async ($, e) => {
+  on('tool.call', { tool: START_TOOL_NAME }, async ($, e, next) => {
     const context = await readContext($)
     if (context?.role !== 'orchestrator') return { deny: 'start_agent runs only in a Herdr orchestrator pane.' }
     const { tool: _tool, tool_use_id: _id, consent: _consent, agentId: _agent, ...input } = e
     try {
-      return { result: await startAgent(await readHost($), input, context) }
+      return { result: await startAgent(await readHost($), input, context, next.signal) }
     } catch (error) {
-      return { isError: true, result: error instanceof Error ? error.message : 'start_agent failed' }
+      // A hook cannot set isError (core sets it); deny is how its failure reaches the model as an error.
+      return { deny: error instanceof Error ? error.message : 'start_agent failed' }
     }
   })
 

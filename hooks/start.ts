@@ -7,9 +7,10 @@ type Orchestrator = { pane: string; workspace: string }
 
 /**
  * The mod's start tool: its own `kind` and `permissionMode`, then the request rules and
- * Herdr transaction it shares with the pi tool. Resolves the tool's result text.
+ * Herdr transaction it shares with the pi tool. Resolves the tool's result text. An abort
+ * (the user interrupted) rolls back a created pane and skips the prompt.
  */
-export async function startAgent(host: Host, input: Record<string, unknown>, orchestrator: Orchestrator): Promise<string> {
+export async function startAgent(host: Host, input: Record<string, unknown>, orchestrator: Orchestrator, signal?: AbortSignal): Promise<string> {
   const { kind: rawKind, permissionMode: rawPermissionMode, ...shared } = input
   const kind = oneOf(AGENT_KINDS, rawKind, 'kind') ?? 'pi'
   const permissionMode = oneOf(PERMISSION_MODES, rawPermissionMode, 'permissionMode')
@@ -18,7 +19,7 @@ export async function startAgent(host: Host, input: Record<string, unknown>, orc
   const launch = await prepareLaunch(host, {
     kind, name: request.name, parentPane: orchestrator.pane, model: request.model, thinking: request.thinking, permissionMode,
   })
-  const started = await startInNewLocation(host, request, cwd, launch)
+  const started = await startInNewLocation(host, request, cwd, launch, signal)
   return JSON.stringify({
     name: request.name,
     kind: launch.kind,
