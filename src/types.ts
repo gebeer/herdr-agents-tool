@@ -7,8 +7,12 @@ export { DIRECTIONS, PLACEMENTS, type Direction, type Placement } from "../core/
 export { THINKING_LEVELS, type RequestedThinking } from "../protocol/model-config.js";
 export { PI_SPAWN_TOOL as TOOL_NAME } from "../protocol/pi-child.js";
 
+export const AGENT_KINDS = ["pi", "claude"] as const;
+export type AgentKind = (typeof AGENT_KINDS)[number];
+
 export interface HerdrStartAgentInput {
 	name: string;
+	kind?: AgentKind;
 	placement?: Placement;
 	workspace?: string;
 	direction?: Direction;
@@ -40,8 +44,8 @@ export interface StartResultDetails {
 	pane: string;
 	tab?: string;
 	workspace?: string;
-	model: string;
-	thinking: ThinkingLevel | "off";
+	model?: string;
+	thinking?: ThinkingLevel | "off";
 	herdr: unknown;
 	fallback?: FallbackSelection;
 	promptSubmitted?: true;

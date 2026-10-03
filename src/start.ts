@@ -1,12 +1,13 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { herdrId } from "../core/herdr.js";
-import { resolveCwd, validateStartRequest } from "../core/request.js";
+import { oneOf, resolveCwd, validateStartRequest, type StartRequest } from "../core/request.js";
 import { startInNewLocation } from "../core/transaction.js";
+import { claudeChildLaunch } from "../protocol/claude-child.js";
 import {
 	DEFAULT_MODEL_CONFIG,
 	MODEL_CONFIG_FILE,
@@ -23,6 +24,7 @@ import { piChildArgv } from "../protocol/pi-child.js";
 import { verifyChildProfile } from "./child-profile.js";
 import { piHerdrHost, resolveHerdrBinary } from "./herdr-cli.js";
 import {
+	AGENT_KINDS,
 	type HerdrStartAgentInput,
 	type RequestedThinking,
 	type SelectedProfile,
@@ -33,6 +35,8 @@ import {
 export { expandModelAlias, resolveModelProfile, type ModelConfig, type ModelProfile } from "../protocol/model-config.js";
 
 const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
+// The repo root, which is also the Claude Code plugin Claude children load.
+const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** The canonical path of an existing directory, else undefined. */
 async function realDirectory(path: string): Promise<string | undefined> {
@@ -184,7 +188,16 @@ function expectedPiArgv(name: string, profile: SelectedProfile, parentPane: stri
 	});
 }
 
-/** Pi's start tool: pi profile selection and preflight, then the shared Herdr transaction. */
+/** Claude children skip profile selection and preflight: Claude Code takes the model and effort as given. */
+function claudeLaunch(request: StartRequest, parentPane: string) {
+	try {
+		return { kind: "claude", ...claudeChildLaunch(request.name, parentPane, PLUGIN_ROOT, request.model, request.thinking, "bypassPermissions") };
+	} catch (error) {
+		throw new StartAgentError("validation", error instanceof Error ? error.message : String(error));
+	}
+}
+
+/** Pi's start tool: pi profile selection and preflight (pi children only), then the shared Herdr transaction. */
 export async function startHerdrPiAgent(
 	pi: Pick<ExtensionAPI, "exec">,
 	input: HerdrStartAgentInput,
@@ -192,37 +205,41 @@ export async function startHerdrPiAgent(
 	ctx: ExtensionContext,
 	dependencies: StartHerdrPiAgentDependencies = {},
 ): Promise<{ text: string; details: StartResultDetails }> {
-	const request = validateStartRequest(input, process.env.HERDR_WORKSPACE_ID);
+	const { kind: rawKind, ...shared } = input;
+	const kind = oneOf(AGENT_KINDS, rawKind, "kind") ?? "pi";
+	const request = validateStartRequest(shared, process.env.HERDR_WORKSPACE_ID);
 	const parentPane = herdrId(process.env.HERDR_PANE_ID);
 	if (!parentPane) throw new StartAgentError("validation", "invalid Herdr context: orchestrator pane is unavailable");
 	const cwd = await resolveCwd(realDirectory, ctx.cwd, request.cwd);
-	const profile = dependencies.selectProfile
-		? await dependencies.selectProfile(ctx, request.model, request.thinking, cwd, signal)
-		: await selectProfile(ctx, request.model, request.thinking, cwd, signal, dependencies.verifyProfile);
-	const launch = {
-		kind: "pi",
-		argv: expectedPiArgv(request.name, profile, parentPane),
-		env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR },
-	};
+	const profile = kind === "claude"
+		? undefined
+		: dependencies.selectProfile
+			? await dependencies.selectProfile(ctx, request.model, request.thinking, cwd, signal)
+			: await selectProfile(ctx, request.model, request.thinking, cwd, signal, dependencies.verifyProfile);
+	const launch = profile
+		? { kind: "pi", argv: expectedPiArgv(request.name, profile, parentPane), env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } }
+		: claudeLaunch(request, parentPane);
 	const started = await startInNewLocation(piHerdrHost(pi, resolveHerdrBinary()), request, cwd, launch, signal);
 
 	const submission = request.prompt !== undefined ? { promptSubmitted: true as const } : {};
+	const { model, thinking } = profile ?? request;
+	const given = { ...(model ? { model } : {}), ...(thinking ? { thinking } : {}) };
 	const details: StartResultDetails = {
 		name: request.name,
 		pane: started.paneId,
 		...(started.tabId ? { tab: started.tabId } : {}),
 		...(started.workspaceId ? { workspace: started.workspaceId } : {}),
-		model: profile.model,
-		thinking: profile.thinking,
+		...given,
 		herdr: started.herdr,
-		...(profile.fallback ? { fallback: profile.fallback } : {}),
+		...(profile?.fallback ? { fallback: profile.fallback } : {}),
 		...submission,
 	};
 	return {
 		text: JSON.stringify({
 			name: request.name,
 			pane: started.paneId,
-			...(profile.fallback ? { fallback: profile.fallback } : {}),
+			...(profile ? {} : given),
+			...(profile?.fallback ? { fallback: profile.fallback } : {}),
 			...submission,
 		}),
 		details,

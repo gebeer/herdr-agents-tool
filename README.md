@@ -57,6 +57,8 @@ herdr_start_agent({
 
 Placement defaults to a new tab in the orchestrator's workspace. Use `placement: "pane"` only when the user explicitly requests a split pane; it splits the orchestrator's own pane, and `direction` then defaults to `"right"`.
 
+`kind: "claude"` starts a Claude Code child instead of a pi one, loading this repository as its plugin so it reports back like the mod's Claude children. `model` and `thinking` go to Claude Code as given, with no profile selection, preflight, or fallback. These children always run with `--permission-mode bypassPermissions`, since pi has no permission modes: rely on your damage-control hooks, not on permission prompts.
+
 `name` must match `[a-z][a-z0-9_-]{0,31}`. A configured alias expands before registry lookup, child-profile preflight, and Herdr launch. An explicit thinking value overrides that alias's default. An exact `provider/model-id` uses the fallback thinking value when thinking is omitted.
 
 The requested profile is checked first. If its model is malformed, unknown, unavailable, incompatible with the thinking level, or rejected by child-profile preflight/auth, the configured fallback profile is checked before Herdr changes the layout. Omitting `model` selects the fallback directly; an explicit `thinking` still overrides its default. Automatic fallback use is reported in both tool text and details with the requested profile (when available), selected fallback profile, and reason. If fallback also fails, the error includes both failures and no pane, tab, or workspace is created. Invalid configuration, other invalid tool input, invalid cwd/Herdr context, and failures after layout creation do not trigger fallback.
@@ -102,7 +104,7 @@ start_agent({
   kind: "claude",            // pi (default) | claude
   model: "opus",             // claude: Claude Code alias or ID; pi: herdr-agents.json alias or provider/model-id
   thinking: "high",          // claude accepts low | medium | high | xhigh | max (passed as --effort)
-  permissionMode: "acceptEdits", // claude only; the default
+  permissionMode: "plan",    // claude only; defaults to bypassPermissions
   prompt: "Review the current diff. Report actionable findings only.",
 })
 ```

@@ -9,7 +9,7 @@ import { childNotifyChecks } from "./child-notify.js";
 import { claudeModChecks } from "./claude-mod.js";
 import { requirePaneCloseSuccess, runHerdr } from "../src/herdr-cli.js";
 import { loadModelConfig, resolveModelProfile, selectModel, selectProfileFromConfig, startHerdrPiAgent, type ModelConfig } from "../src/start.js";
-import type { SelectedProfile } from "../src/types.js";
+import { StartAgentError, type SelectedProfile } from "../src/types.js";
 
 const previousPane = process.env.HERDR_PANE_ID;
 process.env.HERDR_PANE_ID = "w-test:parent";
@@ -295,6 +295,7 @@ async function inputValidationChecks(): Promise<void> {
 		{ name: "reviewer", placement: ["workspace"] },
 		{ name: "reviewer", direction: { value: "right" } },
 		{ name: "reviewer", thinking: "unbounded" },
+		{ name: "reviewer", kind: "codex" },
 		{ name: "reviewer", placement: "workspace", injected: true },
 	]) {
 		await expectReject(() => startHerdrPiAgent(pi, input as never, undefined, context), "invalid");
@@ -442,6 +443,56 @@ async function placementAndCompensationChecks(): Promise<void> {
 	assert.equal(uncertainCalls.length, 1, "uncertain ownership must not attempt cleanup");
 }
 
+async function claudeKindChecks(): Promise<void> {
+	const pluginRoot = join(import.meta.dirname, "..");
+	let profileCalls = 0;
+	const selectProfile = async (): Promise<SelectedProfile> => { profileCalls++; return profile; };
+	for (const scenario of [
+		{ input: { name: "claudecheck", model: "opus", thinking: "high" }, flags: ["--model", "opus", "--effort", "high"], reported: { model: "opus", thinking: "high" } },
+		{ input: { name: "claudebare" }, flags: [], reported: {} },
+	] as const) {
+		const calls: string[][] = [];
+		const pi = {
+			exec: async (_command: string, args: string[]) => {
+				calls.push(args);
+				if (calls.length === 1) return herdrResponse({ type: "pane_info", pane: { pane_id: "w1:p4" } });
+				return herdrResponse({
+					type: "agent_started",
+					agent: { name: scenario.input.name, pane_id: "w1:p4", agent: "claude", interactive_ready: true },
+					argv: ["claude", ...args.slice(args.indexOf("--") + 1)],
+				});
+			},
+		};
+		const started = await startHerdrPiAgent(pi as never, { ...scenario.input, kind: "claude", placement: "pane" } as never, undefined, { cwd: root } as never, { selectProfile });
+		assert.deepEqual(calls[0], [
+			"pane", "split", "--current", "--direction", "right", "--cwd", root, "--no-focus",
+			"--env", "HERDR_AGENTS_PARENT_PANE=w-test:parent", "--env", `HERDR_AGENTS_NAME=${scenario.input.name}`,
+		]);
+		const start = calls[1]!;
+		assert.deepEqual(start.slice(2, 7), [scenario.input.name, "--kind", "claude", "--pane", "w1:p4"]);
+		assert.deepEqual(start.slice(start.indexOf("--") + 1), [
+			"--name", scenario.input.name, ...scenario.flags, "--permission-mode", "bypassPermissions", "--plugin-dir", pluginRoot,
+		]);
+		assert.deepEqual(JSON.parse(started.text), { name: scenario.input.name, pane: "w1:p4", ...scenario.reported });
+		assert.equal(started.details.model, scenario.reported.model);
+		assert.equal(started.details.thinking, scenario.reported.thinking);
+	}
+	assert.equal(profileCalls, 0, "claude children skip pi profile selection");
+
+	let calls = 0;
+	const pi = { exec: async () => { calls++; throw new Error("must not execute"); } };
+	for (const [input, message] of [
+		[{ name: "claudeoff", kind: "claude", thinking: "off" }, "unsupported thinking level for claude: off"],
+		[{ name: "claudebad", kind: "claude", model: "bad model" }, "invalid model for claude"],
+	] as const) {
+		await assert.rejects(
+			() => startHerdrPiAgent(pi, input as never, undefined, { cwd: root } as never, { selectProfile }),
+			(error: unknown) => error instanceof StartAgentError && error.kind === "validation" && error.message.includes(message),
+		);
+	}
+	assert.equal(calls, 0, "invalid claude launch must fail before layout mutation");
+}
+
 async function promptChecks(): Promise<void> {
 	const prompt = '  Review "this"; $(not-a-shell)\n日本語\n  ';
 	for (const scenario of ["success", "not-ready", "wrong-type", "wrong-name", "wrong-pane", "wrong-kind", "timeout", "abort", "transport", "rejected"]) {
@@ -503,6 +554,7 @@ try {
 	await herdrEnvelopeChecks();
 	await inputValidationChecks();
 	await placementAndCompensationChecks();
+	await claudeKindChecks();
 	await promptChecks();
 	await childNotifyChecks();
 	await claudeModChecks();
