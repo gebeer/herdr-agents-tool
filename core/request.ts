@@ -71,7 +71,7 @@ export function validateStartRequest(input: unknown, defaultWorkspace: string | 
 }
 
 /**
- * The requested directory resolved against `base`, canonical and existing.
+ * The requested directory resolved against the absolute `base`, canonical and existing.
  * `realDirectory` is the host's: the canonical path of an existing directory, else undefined.
  */
 export async function resolveCwd(
@@ -80,7 +80,6 @@ export async function resolveCwd(
 	requested: string | undefined,
 ): Promise<string> {
 	const candidate = requested === undefined ? base : requested.startsWith("/") ? requested : `${base}/${requested}`;
-	if (!candidate.startsWith("/")) throw new StartAgentError("validation", "invalid cwd: must resolve to an absolute path");
 	const directory = await realDirectory(candidate);
 	if (!directory) throw new StartAgentError("validation", "invalid cwd: must be an existing directory");
 	return directory;

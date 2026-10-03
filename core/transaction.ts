@@ -1,5 +1,5 @@
 import { StartAgentError } from "./errors.ts";
-import { herdrId, record, requirePaneCloseSuccess, runHerdr, type HerdrHost, type HerdrResult } from "./herdr.ts";
+import { herdrId, record, runHerdr, type HerdrHost, type HerdrResult } from "./herdr.ts";
 import type { Placement, StartRequest } from "./request.ts";
 
 const CREATE_TIMEOUT_MS = 10_000;
@@ -42,32 +42,19 @@ function requireResultType(result: HerdrResult, expected: string): void {
 /** Proves ownership of the created root pane first, so any later malformation still rolls it back. */
 function parseCreatedLocation(placement: Placement, result: HerdrResult): OwnedLocation {
 	try {
-		switch (placement) {
-			case "pane": {
-				requireResultType(result, "pane_info");
-				const pane = requireRecord(result.pane, "pane");
-				return { paneId: requireId(pane.pane_id, "pane.pane_id") };
-			}
-			case "tab": {
-				requireResultType(result, "tab_created");
-				const rootPane = requireRecord(result.root_pane, "root_pane");
-				const paneId = requireId(rootPane.pane_id, "root_pane.pane_id");
-				const tab = requireRecord(result.tab, "tab", paneId);
-				return { paneId, tabId: requireId(tab.tab_id, "tab.tab_id", paneId) };
-			}
-			case "workspace": {
-				requireResultType(result, "workspace_created");
-				const rootPane = requireRecord(result.root_pane, "root_pane");
-				const paneId = requireId(rootPane.pane_id, "root_pane.pane_id");
-				const tab = requireRecord(result.tab, "tab", paneId);
-				const workspace = requireRecord(result.workspace, "workspace", paneId);
-				return {
-					paneId,
-					tabId: requireId(tab.tab_id, "tab.tab_id", paneId),
-					workspaceId: requireId(workspace.workspace_id, "workspace.workspace_id", paneId),
-				};
-			}
+		if (placement === "pane") {
+			requireResultType(result, "pane_info");
+			const pane = requireRecord(result.pane, "pane");
+			return { paneId: requireId(pane.pane_id, "pane.pane_id") };
 		}
+		requireResultType(result, placement === "tab" ? "tab_created" : "workspace_created");
+		const rootPane = requireRecord(result.root_pane, "root_pane");
+		const paneId = requireId(rootPane.pane_id, "root_pane.pane_id");
+		const tab = requireRecord(result.tab, "tab", paneId);
+		const workspace = placement === "workspace" ? requireRecord(result.workspace, "workspace", paneId) : undefined;
+		const tabId = requireId(tab.tab_id, "tab.tab_id", paneId);
+		if (!workspace) return { paneId, tabId };
+		return { paneId, tabId, workspaceId: requireId(workspace.workspace_id, "workspace.workspace_id", paneId) };
 	} catch (error) {
 		if (error instanceof StartAgentError && error.ownedPaneId) throw error;
 		throw new StartAgentError("uncertain-create", "malformed create response: ownership was not proven");
@@ -103,16 +90,13 @@ function validateAgentStarted(result: HerdrResult, name: string, paneId: string,
 }
 
 /**
- * One fresh attempt to close exactly the owned pane, accepted only on Herdr's `ok`. It never
- * reuses the caller's signal, which may be the reason for the rollback.
+ * One attempt to close exactly the owned pane, accepted only on Herdr's `{ type: "ok" }`. It never
+ * takes the caller's signal, which may be the reason for the rollback.
  */
 async function compensate(host: HerdrHost, paneId: string, cwd: string): Promise<string | undefined> {
 	try {
-		const closed = await runHerdr(host, ["pane", "close", paneId], {
-			cwd, timeoutMs: COMPENSATION_TIMEOUT_MS, stage: "compensation", signal: new AbortController().signal,
-		});
-		requirePaneCloseSuccess(closed);
-		return undefined;
+		const closed = await runHerdr(host, ["pane", "close", paneId], { cwd, timeoutMs: COMPENSATION_TIMEOUT_MS, stage: "compensation" });
+		return closed.result.type === "ok" ? undefined : "compensation: malformed Herdr response: expected ok";
 	} catch (error) {
 		return error instanceof Error ? error.message : "compensation failed";
 	}

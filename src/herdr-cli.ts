@@ -4,8 +4,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { StartAgentError } from "../core/errors.js";
 import { runHerdr as runHerdrOn, type HerdrEnvelope, type HerdrHost } from "../core/herdr.js";
 
-export { requirePaneCloseSuccess, type HerdrEnvelope } from "../core/herdr.js";
-
 function executable(path: string): boolean {
 	try {
 		accessSync(path, constants.X_OK);

@@ -98,10 +98,3 @@ export async function runHerdr(
 	}
 	return parseSuccess(stage, isCreate ? "uncertain-create" : "startup", ran.stdout);
 }
-
-/** Herdr acknowledges a successful pane close with exactly `{ type: "ok" }`. */
-export function requirePaneCloseSuccess(envelope: HerdrEnvelope): void {
-	if (envelope.result.type !== "ok") {
-		throw new StartAgentError("compensation", "compensation: malformed Herdr response: expected ok");
-	}
-}

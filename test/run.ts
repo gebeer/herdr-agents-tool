@@ -7,7 +7,7 @@ import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-
 import { verifyChildProfile } from "../src/child-profile.js";
 import { childNotifyChecks } from "./child-notify.js";
 import { claudeModChecks } from "./claude-mod.js";
-import { requirePaneCloseSuccess, runHerdr } from "../src/herdr-cli.js";
+import { runHerdr } from "../src/herdr-cli.js";
 import { loadModelConfig, resolveModelProfile, selectModel, selectProfileFromConfig, startHerdrPiAgent, type ModelConfig } from "../src/start.js";
 import { StartAgentError, type SelectedProfile } from "../src/types.js";
 
@@ -275,11 +275,10 @@ async function herdrEnvelopeChecks(): Promise<void> {
 		},
 	}, "/not-run", [], { cwd: root, timeout: 100, stage: "compensation" });
 	assert.equal(timeout, 100, "runner must receive the bounded deadline");
-	requirePaneCloseSuccess(success);
+	assert.equal(success.result.type, "ok");
 	await expectReject(() => runHerdr({
 		exec: async () => ({ code: 0, killed: false, stderr: "", stdout: JSON.stringify({ result: { type: "ok" } }) }),
 	}, "/not-run", [], { cwd: root, timeout: 100, stage: "compensation" }), "malformed Herdr response envelope");
-	assert.throws(() => requirePaneCloseSuccess({ id: "rpc-2", result: { type: "pane_info" } }), /expected ok/);
 	await expectReject(() => runHerdr({
 		exec: async () => ({ code: 0, killed: false, stderr: "", stdout: "{}" }),
 	}, "/not-run", [], { cwd: root, timeout: 100, stage: "layout create" }), "malformed Herdr response envelope");
@@ -404,8 +403,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 	};
 	await expectReject(() => startHerdrPiAgent(pi as never, { name: "cleanupcheck", placement: "workspace" } as never, outer.signal, { cwd: root } as never, { selectProfile }), "agent startup: aborted; compensation failed for pane w9:p1: compensation: malformed Herdr response: expected ok");
 	assert.deepEqual(calls[2]?.args, ["pane", "close", "w9:p1"]);
-	assert.notEqual(calls[2]?.signal, outer.signal, "compensation must not reuse the aborted caller signal");
-	assert.equal(calls[2]?.signal?.aborted, false, "compensation signal must start live");
+	assert.equal(calls[2]?.signal, undefined, "compensation must not take the aborted caller signal");
 
 	const lateAbort = new AbortController();
 	const lateCalls: string[][] = [];
