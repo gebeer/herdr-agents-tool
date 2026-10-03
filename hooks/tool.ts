@@ -11,6 +11,7 @@ export const START_TOOL_NAME = 'mcp__herdr-agents__start_agent'
 // tool so its name typechecks either way. Loose arguments: startAgent validates them.
 declare module 'claude-code' {
   interface McpToolInputs {
+    // @ts-ignore TS2717 when the generated types also declare it (our server was connected at save).
     'mcp__herdr-agents__start_agent': Record<string, unknown>
   }
 }
