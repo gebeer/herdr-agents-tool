@@ -121,7 +121,7 @@ async function compensate(host: HerdrHost, paneId: string, cwd: string): Promise
 async function rolledBack(host: HerdrHost, primary: Error, paneId: string, cwd: string): Promise<Error> {
 	const cleanupFailure = await compensate(host, paneId, cwd);
 	return cleanupFailure
-		? new Error(`${primary.message}; compensation failed: ${cleanupFailure}`)
+		? new Error(`${primary.message}; compensation failed for pane ${paneId}: ${cleanupFailure}`)
 		: new Error(`${primary.message}; compensation closed created pane`);
 }
 

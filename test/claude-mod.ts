@@ -164,7 +164,7 @@ async function rollbackChecks(): Promise<void> {
 	await assert.rejects(startAgent(notReady, { name: "w", kind: "claude" }, ORCHESTRATOR), /agent_not_ready; compensation closed created pane/);
 
 	const closeFails = fakeHost(herdr({ start: () => "throw", close: () => ok({ type: "nope" }) }));
-	await assert.rejects(startAgent(closeFails, { name: "w" }, ORCHESTRATOR), /agent startup: Herdr transport failure; compensation failed: compensation: malformed Herdr response: expected ok/);
+	await assert.rejects(startAgent(closeFails, { name: "w" }, ORCHESTRATOR), /agent startup: Herdr transport failure; compensation failed for pane w:p2: compensation: malformed Herdr response: expected ok/);
 
 	const uncertain = fakeHost(herdr({ create: () => "throw" }));
 	await assert.rejects(startAgent(uncertain, { name: "w" }, ORCHESTRATOR), /creation outcome is uncertain and no pane was closed/);

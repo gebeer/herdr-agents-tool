@@ -401,7 +401,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			return herdrResponse({ type: "pane_info" });
 		},
 	};
-	await expectReject(() => startHerdrPiAgent(pi as never, { name: "cleanupcheck", placement: "workspace" } as never, outer.signal, { cwd: root } as never, { selectProfile }), "agent startup: aborted; compensation failed: compensation: malformed Herdr response: expected ok");
+	await expectReject(() => startHerdrPiAgent(pi as never, { name: "cleanupcheck", placement: "workspace" } as never, outer.signal, { cwd: root } as never, { selectProfile }), "agent startup: aborted; compensation failed for pane w9:p1: compensation: malformed Herdr response: expected ok");
 	assert.deepEqual(calls[2]?.args, ["pane", "close", "w9:p1"]);
 	assert.notEqual(calls[2]?.signal, outer.signal, "compensation must not reuse the aborted caller signal");
 	assert.equal(calls[2]?.signal?.aborted, false, "compensation signal must start live");
