@@ -12,8 +12,6 @@ import {
 import { piChildArgv } from '../protocol/pi-child.ts'
 import type { Host } from './host.ts'
 
-const DEFAULT_PERMISSION_MODE: PermissionMode = 'bypassPermissions'
-
 export type LaunchRequest = {
   kind: AgentKind
   name: string
@@ -37,7 +35,7 @@ export async function prepareLaunch(host: Host, request: LaunchRequest): Promise
 /** Claude children load this plugin (see child.ts); protocol/claude-child.ts builds their launch. */
 function claudeLaunch(host: Host, request: LaunchRequest): Launch {
   const { model, thinking, name, parentPane } = request
-  const permissionMode = request.permissionMode ?? DEFAULT_PERMISSION_MODE
+  const permissionMode = request.permissionMode ?? 'bypassPermissions'
   return { kind: 'claude', ...claudeChildLaunch(name, parentPane, host.pluginRoot, model, thinking, permissionMode), model, thinking }
 }
 
@@ -57,8 +55,7 @@ async function piLaunch(host: Host, request: LaunchRequest): Promise<Launch> {
     throw new Error('invalid model for pi: use one exact provider/model-id or configured alias')
   }
   const argv = piChildArgv({
-    name: request.name, model: profile.model, thinking: profile.thinking, parentPane: request.parentPane,
-    notifierPath: `${host.pluginRoot}/src/child-notify.ts`,
+    name: request.name, model: profile.model, thinking: profile.thinking, parentPane: request.parentPane, pluginRoot: host.pluginRoot,
   })
   return { kind: 'pi', argv, env: { PI_CODING_AGENT_DIR: agentDir }, model: profile.model, thinking: profile.thinking }
 }

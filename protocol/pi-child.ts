@@ -11,8 +11,8 @@ export interface PiChildLaunch {
 	model: string;
 	thinking: string;
 	parentPane: string;
-	/** Absolute path of src/child-notify.ts, which reports to `parentPane`. */
-	notifierPath: string;
+	/** This repo's absolute root; the child loads its src/child-notify.ts, which reports to `parentPane`. */
+	pluginRoot: string;
 }
 
 /** Arguments after the `pi` executable. */
@@ -20,7 +20,7 @@ export function piChildArgv(launch: PiChildLaunch): string[] {
 	return [
 		"--name", launch.name, "--model", launch.model, "--thinking", launch.thinking,
 		"--exclude-tools", PI_SPAWN_TOOL,
-		"--extension", launch.notifierPath,
+		"--extension", `${launch.pluginRoot}/src/child-notify.ts`,
 		"--herdr-parent-pane", launch.parentPane,
 		"--append-system-prompt", `You are a subagent. Do not spawn additional subagents. Your orchestrator is in Herdr pane ${launch.parentPane}. Automatic completion reporting is installed; do not send a separate completion notification.`,
 	];

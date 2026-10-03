@@ -131,7 +131,7 @@ async function piStartChecks(): Promise<void> {
 	assert.deepEqual(host.calls[0]!.slice(-2), ["--env", "PI_CODING_AGENT_DIR=/home/me/.pi/agent"]);
 	const start = host.calls[1]!;
 	assert.deepEqual(start.slice(start.indexOf("--") + 1), piChildArgv({
-		name: "piworker", model: "test/terra", thinking: "medium", parentPane: "w:parent", notifierPath: "/plugin/src/child-notify.ts",
+		name: "piworker", model: "test/terra", thinking: "medium", parentPane: "w:parent", pluginRoot: "/plugin",
 	}));
 
 	const fallback = fakeHost(herdr(), piFiles);

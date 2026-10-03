@@ -26,7 +26,7 @@ import { piHerdrHost, resolveHerdrBinary } from "./herdr-cli.js";
 import type { SelectedProfile, StartResultDetails } from "./types.js";
 
 const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
-// The repo root, which is also the Claude Code plugin Claude children load.
+// The repo root: the Claude Code plugin Claude children load, and the home of pi children's notifier.
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 /** The canonical path of an existing directory, else undefined. */
@@ -149,13 +149,6 @@ function selectProfile(
 	return selectProfileFromConfig(ctx, loadModelConfig(ctx.cwd, ctx.isProjectTrusted()), requestedModel, requestedThinking, cwd, signal);
 }
 
-function expectedPiArgv(name: string, profile: SelectedProfile, parentPane: string): string[] {
-	return piChildArgv({
-		name, model: profile.model, thinking: profile.thinking, parentPane,
-		notifierPath: fileURLToPath(new URL("./child-notify.ts", import.meta.url)),
-	});
-}
-
 /** Claude children skip profile selection and preflight: Claude Code takes the model and effort as given. */
 function claudeLaunch(request: StartRequest, parentPane: string) {
 	try {
@@ -185,7 +178,8 @@ export async function startHerdrPiAgent(
 		launch = claudeLaunch(request, parentPane);
 	} else {
 		profile = await select(ctx, request.model, request.thinking, cwd, signal);
-		launch = { kind: "pi", argv: expectedPiArgv(request.name, profile, parentPane), env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } };
+		const argv = piChildArgv({ name: request.name, model: profile.model, thinking: profile.thinking, parentPane, pluginRoot: PLUGIN_ROOT });
+		launch = { kind: "pi", argv, env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } };
 	}
 	const started = await startInNewLocation(piHerdrHost(pi, resolveHerdrBinary()), request, cwd, launch, signal);
 
