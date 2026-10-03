@@ -1,8 +1,7 @@
 import type { ToolSpec } from 'claude-code'
-import { DIRECTIONS, PLACEMENTS } from '../core/request.ts'
+import { AGENT_KINDS, DIRECTIONS, PLACEMENTS } from '../core/request.ts'
 import { PERMISSION_MODES } from '../protocol/claude-child.ts'
 import { THINKING_LEVELS } from '../protocol/model-config.ts'
-import { AGENT_KINDS } from './launch.ts'
 
 /** The model calls it as `mcp__<plugin>__start_agent`; the matcher needs the full name as a literal. */
 export const START_TOOL_NAME = 'mcp__herdr-agents__start_agent'

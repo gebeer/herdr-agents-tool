@@ -1,3 +1,4 @@
+import type { AgentKind } from '../core/request.ts'
 import type { Launch as HerdrLaunch } from '../core/transaction.ts'
 import { claudeChildLaunch, type PermissionMode } from '../protocol/claude-child.ts'
 import {
@@ -10,9 +11,6 @@ import {
 } from '../protocol/model-config.ts'
 import { piChildArgv } from '../protocol/pi-child.ts'
 import type { Host } from './host.ts'
-
-export const AGENT_KINDS = ['claude', 'pi'] as const
-export type AgentKind = (typeof AGENT_KINDS)[number]
 
 const DEFAULT_PERMISSION_MODE: PermissionMode = 'bypassPermissions'
 

@@ -6,7 +6,7 @@ import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { herdrId } from "../core/herdr.js";
 import { oneOf, resolveCwd, validateStartRequest, type StartRequest } from "../core/request.js";
-import { startInNewLocation } from "../core/transaction.js";
+import { startInNewLocation, type Launch } from "../core/transaction.js";
 import { claudeChildLaunch } from "../protocol/claude-child.js";
 import {
 	DEFAULT_MODEL_CONFIG,
@@ -211,14 +211,16 @@ export async function startHerdrPiAgent(
 	const parentPane = herdrId(process.env.HERDR_PANE_ID);
 	if (!parentPane) throw new StartAgentError("validation", "invalid Herdr context: orchestrator pane is unavailable");
 	const cwd = await resolveCwd(realDirectory, ctx.cwd, request.cwd);
-	const profile = kind === "claude"
-		? undefined
-		: dependencies.selectProfile
+	let profile: SelectedProfile | undefined;
+	let launch: Launch;
+	if (kind === "claude") {
+		launch = claudeLaunch(request, parentPane);
+	} else {
+		profile = dependencies.selectProfile
 			? await dependencies.selectProfile(ctx, request.model, request.thinking, cwd, signal)
 			: await selectProfile(ctx, request.model, request.thinking, cwd, signal, dependencies.verifyProfile);
-	const launch = profile
-		? { kind: "pi", argv: expectedPiArgv(request.name, profile, parentPane), env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } }
-		: claudeLaunch(request, parentPane);
+		launch = { kind: "pi", argv: expectedPiArgv(request.name, profile, parentPane), env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } };
+	}
 	const started = await startInNewLocation(piHerdrHost(pi, resolveHerdrBinary()), request, cwd, launch, signal);
 
 	const submission = request.prompt !== undefined ? { promptSubmitted: true as const } : {};

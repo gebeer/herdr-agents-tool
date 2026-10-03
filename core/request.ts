@@ -6,6 +6,8 @@ export const PLACEMENTS = ["pane", "tab", "workspace"] as const;
 export const DIRECTIONS = ["right", "down"] as const;
 export type Placement = (typeof PLACEMENTS)[number];
 export type Direction = (typeof DIRECTIONS)[number];
+export const AGENT_KINDS = ["pi", "claude"] as const;
+export type AgentKind = (typeof AGENT_KINDS)[number];
 
 const NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 const FIELDS = ["name", "placement", "workspace", "direction", "cwd", "model", "thinking", "prompt"];

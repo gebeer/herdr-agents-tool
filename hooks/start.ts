@@ -1,8 +1,8 @@
-import { oneOf, resolveCwd, validateStartRequest } from '../core/request.ts'
+import { AGENT_KINDS, oneOf, resolveCwd, validateStartRequest } from '../core/request.ts'
 import { startInNewLocation } from '../core/transaction.ts'
 import { PERMISSION_MODES } from '../protocol/claude-child.ts'
 import type { Host } from './host.ts'
-import { AGENT_KINDS, prepareLaunch } from './launch.ts'
+import { prepareLaunch } from './launch.ts'
 
 type Orchestrator = { pane: string; workspace: string }
 
