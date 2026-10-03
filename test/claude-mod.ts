@@ -107,7 +107,7 @@ async function claudeStartChecks(): Promise<void> {
 	]);
 	assert.deepEqual(start!.slice(0, 9), ["agent", "start", "worker", "--kind", "claude", "--pane", "w:p2", "--timeout", "30000"]);
 	const argv = start!.slice(start!.indexOf("--") + 1);
-	assert.deepEqual(argv, ["--name", "worker", "--model", "opus", "--effort", "high", "--permission-mode", "acceptEdits", "--plugin-dir", "/plugin"]);
+	assert.deepEqual(argv, ["--name", "worker", "--model", "opus", "--effort", "high", "--permission-mode", "bypassPermissions", "--plugin-dir", "/plugin"]);
 	assert.deepEqual(prompt, ["agent", "prompt", "worker", "Do it."]);
 	assert.equal(host.calls.length, 3);
 

@@ -1,4 +1,5 @@
 import type { Launch as HerdrLaunch } from '../core/transaction.ts'
+import { claudeChildLaunch, type PermissionMode } from '../protocol/claude-child.ts'
 import {
   MODEL_CONFIG_FILE,
   mergeModelConfig,
@@ -8,18 +9,12 @@ import {
   type RequestedThinking,
 } from '../protocol/model-config.ts'
 import { piChildArgv } from '../protocol/pi-child.ts'
-import { AGENT_NAME_ENV, PARENT_PANE_ENV } from './context.ts'
 import type { Host } from './host.ts'
 
 export const AGENT_KINDS = ['claude', 'pi'] as const
 export type AgentKind = (typeof AGENT_KINDS)[number]
 
-export const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan'] as const
-export type PermissionMode = (typeof PERMISSION_MODES)[number]
-
-const DEFAULT_PERMISSION_MODE: PermissionMode = 'acceptEdits'
-const CLAUDE_EFFORTS: readonly RequestedThinking[] = ['low', 'medium', 'high', 'xhigh', 'max']
-const CLAUDE_MODEL = /^[A-Za-z0-9][A-Za-z0-9._:[\]-]*$/
+const DEFAULT_PERMISSION_MODE: PermissionMode = 'bypassPermissions'
 
 export type LaunchRequest = {
   kind: AgentKind
@@ -41,26 +36,11 @@ export async function prepareLaunch(host: Host, request: LaunchRequest): Promise
   return request.kind === 'claude' ? claudeLaunch(host, request) : piLaunch(host, request)
 }
 
-/**
- * Claude children load this plugin, which finds them by `PARENT_PANE_ENV`, adds its subagent
- * instructions to their system prompt, and reports on each turn (see child.ts).
- */
+/** Claude children load this plugin (see child.ts); protocol/claude-child.ts builds their launch. */
 function claudeLaunch(host: Host, request: LaunchRequest): Launch {
-  const { model, thinking: effort, name, parentPane } = request
-  if (model !== undefined && !CLAUDE_MODEL.test(model)) {
-    throw new Error('invalid model for claude: use a Claude Code model alias or ID, such as opus or sonnet')
-  }
-  if (effort !== undefined && !CLAUDE_EFFORTS.includes(effort)) {
-    throw new Error(`unsupported thinking level for claude: ${effort}; use ${CLAUDE_EFFORTS.join(', ')}`)
-  }
-  const argv = [
-    '--name', name,
-    ...(model === undefined ? [] : ['--model', model]),
-    ...(effort === undefined ? [] : ['--effort', effort]),
-    '--permission-mode', request.permissionMode ?? DEFAULT_PERMISSION_MODE,
-    '--plugin-dir', host.pluginRoot,
-  ]
-  return { kind: 'claude', argv, env: { [PARENT_PANE_ENV]: parentPane, [AGENT_NAME_ENV]: name }, model, thinking: effort }
+  const { model, thinking, name, parentPane } = request
+  const permissionMode = request.permissionMode ?? DEFAULT_PERMISSION_MODE
+  return { kind: 'claude', ...claudeChildLaunch(name, parentPane, host.pluginRoot, model, thinking, permissionMode), model, thinking }
 }
 
 /**

@@ -1,7 +1,8 @@
 import type { ToolSpec } from 'claude-code'
 import { DIRECTIONS, PLACEMENTS } from '../core/request.ts'
+import { PERMISSION_MODES } from '../protocol/claude-child.ts'
 import { THINKING_LEVELS } from '../protocol/model-config.ts'
-import { AGENT_KINDS, PERMISSION_MODES } from './launch.ts'
+import { AGENT_KINDS } from './launch.ts'
 
 /** The model calls it as `mcp__<plugin>__start_agent`; the matcher needs the full name as a literal. */
 export const START_TOOL_NAME = 'mcp__herdr-agents__start_agent'
@@ -31,7 +32,7 @@ export const START_TOOL: ToolSpec = {
       cwd: { type: 'string', description: 'Existing directory for the new location. Defaults to the session directory.' },
       model: { type: 'string', description: 'claude: Claude Code model alias or ID (opus, sonnet, ...); defaults to the user\'s configured model. pi: configured alias from ~/.pi/agent/herdr-agents.json or exact provider/model-id; defaults to the configured fallback.' },
       thinking: { type: 'string', enum: THINKING_LEVELS, description: 'Thinking effort; overrides the alias or default. claude accepts low, medium, high, xhigh, max.' },
-      permissionMode: { type: 'string', enum: PERMISSION_MODES, description: 'claude only. Defaults to acceptEdits.' },
+      permissionMode: { type: 'string', enum: PERMISSION_MODES, description: 'claude only. Defaults to bypassPermissions.' },
     },
   },
 }
