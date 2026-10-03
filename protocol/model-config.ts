@@ -19,7 +19,7 @@ export type ModelConfig = {
 	aliases: Record<string, ModelProfile>;
 };
 
-export const DEFAULT_MODEL_CONFIG: ModelConfig = {
+const DEFAULT_MODEL_CONFIG: ModelConfig = {
 	fallback: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
 	aliases: {
 		sol: { model: "openai-codex/gpt-5.6-sol", thinking: "medium" },
@@ -66,8 +66,14 @@ function modelProfile(value: unknown, label: string): ModelProfile {
 	return { model: profile.model, thinking: profile.thinking as RequestedThinking };
 }
 
-/** Validates one parsed config file; `path` only labels errors. */
-export function parseModelConfig(parsed: unknown, path: string): Partial<ModelConfig> {
+/** Parses and validates one config file's text; `path` only labels errors. */
+export function parseModelConfig(text: string, path: string): Partial<ModelConfig> {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(text);
+	} catch (error) {
+		throw new ModelConfigError(`invalid config ${path}: ${error instanceof Error ? error.message : error}`);
+	}
 	const source = record(parsed);
 	if (!source || Object.keys(source).some((key) => key !== "fallback" && key !== "aliases")) {
 		throw new ModelConfigError(`invalid config ${path}: expected fallback and aliases`);
@@ -88,33 +94,23 @@ export function parseModelConfig(parsed: unknown, path: string): Partial<ModelCo
 
 /** Overrides apply in order over the defaults: a fallback replaces, aliases merge. */
 export function mergeModelConfig(overrides: readonly Partial<ModelConfig>[]): ModelConfig {
-	let config: ModelConfig = {
-		fallback: { ...DEFAULT_MODEL_CONFIG.fallback },
-		aliases: { ...DEFAULT_MODEL_CONFIG.aliases },
-	};
-	for (const override of overrides) {
-		config = {
-			fallback: override.fallback ?? config.fallback,
-			aliases: { ...config.aliases, ...override.aliases },
-		};
-	}
-	return config;
+	return overrides.reduce<ModelConfig>((config, override) => ({
+		fallback: override.fallback ?? config.fallback,
+		aliases: { ...config.aliases, ...override.aliases },
+	}), DEFAULT_MODEL_CONFIG);
 }
 
-export function expandModelAlias(requested: string, aliases = DEFAULT_MODEL_CONFIG.aliases): string {
-	return Object.hasOwn(aliases, requested) ? aliases[requested]!.model : requested;
-}
-
+/** Expands a configured alias; any other model passes through, and an omitted one gets the fallback. */
 export function resolveModelProfile(
 	config: ModelConfig,
 	requestedModel: string | undefined,
 	requestedThinking: RequestedThinking | undefined,
 ): ModelProfile {
-	const configured = requestedModel !== undefined && Object.hasOwn(config.aliases, requestedModel)
-		? config.aliases[requestedModel]!
-		: config.fallback;
+	const alias = requestedModel !== undefined && Object.hasOwn(config.aliases, requestedModel)
+		? config.aliases[requestedModel]
+		: undefined;
 	return {
-		model: requestedModel === undefined ? config.fallback.model : expandModelAlias(requestedModel, config.aliases),
-		thinking: requestedThinking ?? configured.thinking,
+		model: alias?.model ?? requestedModel ?? config.fallback.model,
+		thinking: requestedThinking ?? (alias ?? config.fallback).thinking,
 	};
 }

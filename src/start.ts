@@ -10,10 +10,8 @@ import { AGENT_KINDS, oneOf, resolveCwd, validateStartRequest, type StartRequest
 import { startInNewLocation, type Launch } from "../core/transaction.js";
 import { claudeChildLaunch } from "../protocol/claude-child.js";
 import {
-	DEFAULT_MODEL_CONFIG,
 	MODEL_CONFIG_FILE,
 	ModelConfigError,
-	expandModelAlias,
 	mergeModelConfig,
 	parseCanonicalModel,
 	parseModelConfig,
@@ -48,7 +46,7 @@ function canonicalModelString(model: Model<any>): string {
 function readModelConfig(path: string): Partial<ModelConfig> {
 	if (!existsSync(path)) return {};
 	try {
-		return parseModelConfig(JSON.parse(readFileSync(path, "utf8")), path);
+		return parseModelConfig(readFileSync(path, "utf8"), path);
 	} catch (error) {
 		if (error instanceof ModelConfigError) throw new StartAgentError("validation", error.message);
 		throw new StartAgentError("validation", `invalid config ${path}: ${error instanceof Error ? error.message : error}`);
@@ -61,12 +59,12 @@ export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir =
 	return mergeModelConfig(paths.map(readModelConfig));
 }
 
-export function selectModel(ctx: ExtensionContext, requested: string, aliases = DEFAULT_MODEL_CONFIG.aliases): Model<any> {
-	const expanded = expandModelAlias(requested, aliases);
-	const parsed = parseCanonicalModel(expanded);
+/** The registry's model for an exact `provider/model-id`; aliases are already expanded. */
+function selectModel(ctx: ExtensionContext, canonical: string): Model<any> {
+	const parsed = parseCanonicalModel(canonical);
 	if (!parsed) throw new StartAgentError("validation", "invalid model: use one exact provider/model-id or configured alias");
 	const exact = ctx.modelRegistry.find(parsed.provider, parsed.id);
-	if (!exact || canonicalModelString(exact) !== expanded) {
+	if (!exact || canonicalModelString(exact) !== canonical) {
 		throw new StartAgentError("validation", "canonical model unavailable: exact provider/model-id is not known");
 	}
 	return exact;
@@ -89,7 +87,7 @@ export async function selectProfileFromConfig(
 	verifyProfile: typeof verifyChildProfile = verifyChildProfile,
 ): Promise<SelectedProfile> {
 	const check = async (candidate: ModelProfile): Promise<SelectedProfile> => {
-		const model = selectModel(ctx, candidate.model, config.aliases);
+		const model = selectModel(ctx, candidate.model);
 		const profile = {
 			model: canonicalModelString(model),
 			thinking: selectThinking(model, candidate.thinking),
@@ -98,10 +96,10 @@ export async function selectProfileFromConfig(
 		return profile;
 	};
 
+	const requested = resolveModelProfile(config, requestedModel, requestedThinking);
 	if (requestedModel === undefined) {
 		try {
-			const candidate = { ...config.fallback, thinking: requestedThinking ?? config.fallback.thinking };
-			const selected = await check(candidate);
+			const selected = await check(requested);
 			return {
 				...selected,
 				fallback: {
@@ -112,11 +110,10 @@ export async function selectProfileFromConfig(
 			};
 		} catch (error) {
 			const reason = error instanceof Error ? error.message : "profile validation failed";
-			throw new StartAgentError("validation", `fallback profile ${config.fallback.model} (${requestedThinking ?? config.fallback.thinking}) failed: ${reason}`);
+			throw new StartAgentError("validation", `fallback profile ${requested.model} (${requested.thinking}) failed: ${reason}`);
 		}
 	}
 
-	const requested = resolveModelProfile(config, requestedModel, requestedThinking);
 	try {
 		return await check(requested);
 	} catch (error) {

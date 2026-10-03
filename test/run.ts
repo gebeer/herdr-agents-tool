@@ -9,7 +9,7 @@ import { runHerdr } from "../core/herdr.js";
 import { resolveModelProfile, type ModelConfig } from "../protocol/model-config.js";
 import { verifyChildProfile } from "../src/child-profile.js";
 import { piHerdrHost } from "../src/herdr-cli.js";
-import { loadModelConfig, selectModel, selectProfileFromConfig, startHerdrPiAgent } from "../src/start.js";
+import { loadModelConfig, selectProfileFromConfig, startHerdrPiAgent } from "../src/start.js";
 import type { SelectedProfile } from "../src/types.js";
 import { childNotifyChecks } from "./child-notify.js";
 import { claudeModChecks } from "./claude-mod.js";
@@ -78,34 +78,6 @@ async function expectReject(work: () => Promise<unknown>, message: string): Prom
 	await assert.rejects(work, (error: unknown) => error instanceof Error && error.message.includes(message));
 }
 
-function modelAliasChecks(): void {
-	const aliases = [
-		["sol", "openai-codex", "gpt-5.6-sol"],
-		["terra", "openai-codex", "gpt-5.6-terra"],
-		["luna", "openai-codex", "gpt-5.6-luna"],
-	] as const;
-	const lookups: string[] = [];
-	const context = {
-		modelRegistry: {
-			find: (provider: string, id: string) => {
-				lookups.push(`${provider}/${id}`);
-				return aliases.some(([, expectedProvider, expectedId]) => provider === expectedProvider && id === expectedId)
-					? { provider, id }
-					: undefined;
-			},
-		},
-	} as never;
-	for (const [alias, provider, id] of aliases) {
-		const model = selectModel(context, alias);
-		assert.equal(model.provider, provider);
-		assert.equal(model.id, id);
-	}
-	assert.deepEqual(lookups, aliases.map(([, provider, id]) => `${provider}/${id}`));
-	for (const invalid of ["unknown", "constructor", "toString", "__proto__"]) {
-		assert.throws(() => selectModel(context, invalid), /invalid model: use one exact provider\/model-id or configured alias/);
-	}
-}
-
 function modelConfigChecks(): void {
 	const emptyAgentDir = join(root, "empty-agent-config");
 	const defaults = loadModelConfig(root, false, emptyAgentDir);
@@ -117,6 +89,9 @@ function modelConfigChecks(): void {
 			luna: { model: "openai-codex/gpt-5.6-luna", thinking: "medium" },
 		},
 	});
+	for (const key of ["constructor", "toString", "__proto__"]) {
+		assert.equal(resolveModelProfile(defaults, key, undefined).model, key, "inherited keys are not aliases");
+	}
 
 	const agentDir = join(root, "agent-config");
 	const project = join(root, "config-project");
@@ -536,7 +511,6 @@ async function promptChecks(): Promise<void> {
 }
 
 try {
-	modelAliasChecks();
 	modelConfigChecks();
 	await profileFallbackChecks();
 	await untrustedProjectCheck();

@@ -49,7 +49,9 @@ async function piLaunch(host: Host, request: LaunchRequest): Promise<Launch> {
   if (request.permissionMode !== undefined) throw new Error('invalid field combination: permissionMode applies only to claude agents')
   if (!host.home) throw new Error('invalid environment: HOME is unset')
   const agentDir = `${host.home}/.pi/agent`
-  const config = mergeModelConfig([await readPiModelConfig(host, `${agentDir}/${MODEL_CONFIG_FILE}`)])
+  const configPath = `${agentDir}/${MODEL_CONFIG_FILE}`
+  const text = await host.readFile(configPath)
+  const config = mergeModelConfig(text === undefined ? [] : [parseModelConfig(text, configPath)])
   const profile = resolveModelProfile(config, request.model, request.thinking)
   if (!parseCanonicalModel(profile.model)) {
     throw new Error('invalid model for pi: use one exact provider/model-id or configured alias')
@@ -59,16 +61,4 @@ async function piLaunch(host: Host, request: LaunchRequest): Promise<Launch> {
     notifierPath: `${host.pluginRoot}/src/child-notify.ts`,
   })
   return { kind: 'pi', argv, env: { PI_CODING_AGENT_DIR: agentDir }, model: profile.model, thinking: profile.thinking }
-}
-
-async function readPiModelConfig(host: Host, path: string) {
-  const text = await host.readFile(path)
-  if (text === undefined) return {}
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(text)
-  } catch (error) {
-    throw new Error(`invalid config ${path}: ${error instanceof Error ? error.message : error}`)
-  }
-  return parseModelConfig(parsed, path)
 }
