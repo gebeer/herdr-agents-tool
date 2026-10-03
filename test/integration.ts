@@ -203,7 +203,7 @@ try {
 					const message = entry.type === "message" ? record(entry.message) : undefined;
 					if (message?.role !== "user" || !Array.isArray(message.content)) continue;
 					const text = message.content.filter((part) => record(part).type === "text").map((part) => record(part).text).join("");
-					if (text.includes(`${header}\n${expected}\n\nFollow-up:`)) report = text;
+					if (text.includes(`${header}\nNEXT ACTION`) && text.includes(`\n\n${expected}\n[End subagent report]`)) report = text;
 				}
 				if (!report) await new Promise((resolve) => setTimeout(resolve, 250));
 			}
