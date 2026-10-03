@@ -1,14 +1,11 @@
+import type { HerdrHost } from '../core/herdr.ts'
+
 /**
- * The port between the pure core and the engine. The engine lets `$` appear only in
- * register.ts, so that shell builds a Host per call and the core works against it.
+ * The port between the mod's pure core and the engine. The engine lets `$` appear only in
+ * register.ts, so that shell builds a Host per call. `$.process.run` rejects on timeout
+ * without output, so this host reports no `interrupted` result.
  */
-
-export type ProcessResult = { exitCode: number; stdout: string; stderr: string }
-
-export type Host = {
-  /** Runs argv with no shell; rejects when it cannot start or outlives `timeoutMs`. */
-  run: (argv: readonly string[], options: { cwd: string; timeoutMs: number }) => Promise<ProcessResult>
-  herdrBinary: string
+export type Host = HerdrHost & {
   /** This plugin's folder, absolute: the repo root that also holds the pi package. */
   pluginRoot: string
   home: string | undefined

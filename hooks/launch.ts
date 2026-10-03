@@ -1,3 +1,4 @@
+import type { Launch as HerdrLaunch } from '../core/transaction.ts'
 import {
   MODEL_CONFIG_FILE,
   mergeModelConfig,
@@ -29,11 +30,9 @@ export type LaunchRequest = {
   permissionMode?: PermissionMode
 }
 
-/** How Herdr starts one child: the arguments after its executable, its pane's env, and the profile it got. */
-export type Launch = {
+/** How Herdr starts one child, plus the profile it got for the tool result. */
+export type Launch = HerdrLaunch & {
   kind: AgentKind
-  argv: string[]
-  env: Record<string, string>
   model?: string
   thinking?: RequestedThinking
 }

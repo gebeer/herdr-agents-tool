@@ -1,14 +1,12 @@
 import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import type { Direction, Placement } from "../core/request.js";
 import type { RequestedThinking } from "../protocol/model-config.js";
 
+export { StartAgentError } from "../core/errors.js";
+export { DIRECTIONS, PLACEMENTS, type Direction, type Placement } from "../core/request.js";
+export type { OwnedLocation } from "../core/transaction.js";
 export { THINKING_LEVELS, type RequestedThinking } from "../protocol/model-config.js";
 export { PI_SPAWN_TOOL as TOOL_NAME } from "../protocol/pi-child.js";
-
-export const PLACEMENTS = ["pane", "tab", "workspace"] as const;
-export const DIRECTIONS = ["right", "down"] as const;
-
-export type Placement = (typeof PLACEMENTS)[number];
-export type Direction = (typeof DIRECTIONS)[number];
 
 export interface HerdrStartAgentInput {
 	name: string;
@@ -38,12 +36,6 @@ export interface SelectedProfile {
 	fallback?: FallbackSelection;
 }
 
-export interface OwnedLocation {
-	paneId: string;
-	tabId?: string;
-	workspaceId?: string;
-}
-
 export interface StartResultDetails {
 	name: string;
 	pane: string;
@@ -54,15 +46,4 @@ export interface StartResultDetails {
 	herdr: unknown;
 	fallback?: FallbackSelection;
 	promptSubmitted?: true;
-}
-
-export class StartAgentError extends Error {
-	constructor(
-		readonly kind: "validation" | "layout" | "uncertain-create" | "startup" | "compensation",
-		message: string,
-		readonly ownedPaneId?: string,
-	) {
-		super(message);
-		this.name = "StartAgentError";
-	}
 }

@@ -1,6 +1,6 @@
+import { runHerdr } from '../core/herdr.ts'
 import { formatSubagentReport, isReportAcknowledged, paneCloseCommand } from '../protocol/report.ts'
 import type { HerdrContext } from './context.ts'
-import { runHerdr } from './herdr.ts'
 import type { Host } from './host.ts'
 
 const NOTIFY_TIMEOUT_MS = 10_000
@@ -35,7 +35,7 @@ export async function reportToOrchestrator(host: Host, turn: FinishedTurn, child
     cleanup: paneCloseCommand(child.pane),
   })
   try {
-    const result = await runHerdr(host, ['agent', 'prompt', child.parentPane, report], {
+    const { result } = await runHerdr(host, ['agent', 'prompt', child.parentPane, report], {
       cwd: host.sessionCwd, timeoutMs: NOTIFY_TIMEOUT_MS, stage: 'completion notification',
     })
     if (!isReportAcknowledged(result, child.parentPane)) throw new Error('malformed or mismatched notification acknowledgement')

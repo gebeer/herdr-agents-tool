@@ -58,7 +58,7 @@ async function readContext($: EngineInterface) {
 
 async function readHost($: EngineInterface): Promise<Host> {
   return {
-    run: (argv, options) => $.process.run(argv, options),
+    run: (argv, { cwd, timeoutMs }) => $.process.run(argv, { cwd, timeoutMs }),
     herdrBinary: (await $.env.get('HERDR_BIN_PATH')) ?? 'herdr',
     pluginRoot: $.plugin.root,
     home: await $.env.get('HOME'),

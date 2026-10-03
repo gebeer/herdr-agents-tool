@@ -93,7 +93,7 @@ claude --plugin-dir /home/gbr/.pi/extensions/herdr_agents_tool
 
 Like the pi package, it does nothing outside a Herdr pane. One plugin plays two roles, chosen by the pane's environment:
 
-- **Orchestrator**: registers the `start_agent` tool (`mcp__herdr-agents__start_agent`). It runs the same create → start → optional prompt transaction as `herdr_start_agent`, with the same rollback rules: a proven pane is closed once on startup failure, an uncertain create is never guessed at, and a ready agent is never rolled back.
+- **Orchestrator**: registers the `start_agent` tool (`mcp__herdr-agents__start_agent`). It runs the very transaction `herdr_start_agent` runs (`core/transaction.ts`), with the same rollback rules: a proven pane is closed once on startup failure, an uncertain create is never guessed at, and a ready agent is never rolled back.
 - **Child**: a Claude Code child launched by the tool loads this plugin with `--plugin-dir`, recognizes itself by `HERDR_AGENTS_PARENT_PANE` (set on its pane through Herdr's `--env`), registers no tool, adds its subagent instructions as a system-prompt section (`prompt.compose`), and sends each finished main-loop turn's answer to the orchestrator with `herdr agent prompt`. Reports use the same framed format as pi children (`protocol/report.ts`); their cleanup command is `herdr pane close <pane>`.
 
 ```ts
@@ -113,7 +113,9 @@ Pi children are launched with exactly the arguments the pi orchestrator uses (`p
 
 Herdr types the child command into the new pane's shell, so a shell alias or function named `claude` applies to children too: a wrapper that adds `--dangerously-skip-permissions` overrides `permissionMode`. The plugin passes no `--append-system-prompt` (Claude Code keeps only the last one), so a prompt the wrapper appends survives beside the subagent section. A child that also loads this plugin through `CLAUDE_CODE_PLUGIN_DIRS` loads it once, not twice.
 
-`$` (the engine interface) may appear only in `hooks/register.ts`. That file is the imperative shell: it reads the environment and builds a `Host` port (`hooks/host.ts`) for the pure core (`hooks/start.ts`, `hooks/launch.ts`, `hooks/child.ts`, `hooks/herdr.ts`, `hooks/context.ts`). `protocol/` holds the import-free modules both hosts load.
+Both orchestrators share one host-neutral core. `core/` holds tool input validation, cwd resolution, the Herdr CLI adapter, and the create → start → prompt → rollback transaction, written against a `HerdrHost` port. The pi package implements that port over `pi.exec` (`src/herdr-cli.ts`), which keeps a killed command's output, so a create that completes after a timeout or abort is still proven and rolled back. The mod implements it over `$.process.run`, which rejects on timeout instead; such a create is reported as uncertain and never guessed at. `protocol/` holds the report format, `herdr-agents.json` rules, and pi child argv. Neither `core/` nor `protocol/` imports anything outside the two folders, so both hosts load them.
+
+`$` (the engine interface) may appear only in `hooks/register.ts`. That file is the imperative shell: it reads the environment and builds the mod's `Host` (`hooks/host.ts`, the `HerdrHost` port plus plugin facts) for its pure modules: `hooks/start.ts` (the mod's `kind` and `permissionMode`), `hooks/launch.ts` (Claude and pi launch specs), `hooks/child.ts`, and `hooks/context.ts`.
 
 ## Development
 

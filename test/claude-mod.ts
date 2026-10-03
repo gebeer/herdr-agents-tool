@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { reportToOrchestrator, subagentSection } from "../hooks/child.ts";
 import { herdrContext } from "../hooks/context.ts";
-import type { Host, ProcessResult } from "../hooks/host.ts";
-import { startAgent, validateStartInput } from "../hooks/start.ts";
+import type { Host } from "../hooks/host.ts";
+import { startAgent } from "../hooks/start.ts";
+import type { RunResult } from "../core/herdr.ts";
+import { validateStartRequest } from "../core/request.ts";
 import { piChildArgv } from "../protocol/pi-child.ts";
 
 const ORCHESTRATOR = { pane: "w:parent", workspace: "w" };
@@ -11,9 +13,9 @@ const PI_CONFIG = JSON.stringify({
 	aliases: { terra: { model: "test/terra", thinking: "medium" } },
 });
 
-type Responder = (args: string[]) => ProcessResult | "throw";
+type Responder = (args: string[]) => RunResult | "throw";
 
-const ok = (result: Record<string, unknown>): ProcessResult => ({ exitCode: 0, stdout: JSON.stringify({ id: "r", result }), stderr: "" });
+const ok = (result: Record<string, unknown>): RunResult => ({ exitCode: 0, stdout: JSON.stringify({ id: "r", result }), stderr: "" });
 
 /** A Herdr that creates tab w:t2 with root pane w:p2 and starts whatever it is asked to. */
 function herdr(overrides: Partial<Record<"create" | "start" | "prompt" | "close", Responder>> = {}): Responder {
@@ -72,12 +74,12 @@ function contextChecks(): void {
 	assert.equal(herdrContext({ ...base, HERDR_WORKSPACE_ID: undefined }), undefined);
 }
 
-function validationChecks(): void {
-	assert.deepEqual(validateStartInput({ name: "worker" }, "w"), {
-		name: "worker", kind: "pi", placement: "tab", workspace: "w",
-		cwd: undefined, model: undefined, thinking: undefined, permissionMode: undefined, prompt: undefined,
+async function validationChecks(): Promise<void> {
+	assert.deepEqual(validateStartRequest({ name: "worker" }, "w"), {
+		name: "worker", placement: "tab", workspace: "w",
+		cwd: undefined, model: undefined, thinking: undefined, prompt: undefined,
 	});
-	assert.equal(validateStartInput({ name: "worker", placement: "pane" }, "w").direction, "right");
+	assert.equal(validateStartRequest({ name: "worker", placement: "pane" }, "w").direction, "right");
 	for (const [input, error] of [
 		[{ name: "Worker" }, /invalid name/],
 		[{ name: "worker", extra: 1 }, /invalid input field: extra/],
@@ -88,7 +90,9 @@ function validationChecks(): void {
 		[{ name: "worker", thinking: "huge" }, /invalid thinking level/],
 		[{ name: "worker", permissionMode: "yolo" }, /invalid permissionMode/],
 	] as const) {
-		assert.throws(() => validateStartInput(input, "w"), error);
+		const host = fakeHost(herdr());
+		await assert.rejects(startAgent(host, input, ORCHESTRATOR), error);
+		assert.equal(host.calls.length, 0, "invalid input must fail before any Herdr call");
 	}
 }
 
@@ -160,18 +164,18 @@ async function rollbackChecks(): Promise<void> {
 	await assert.rejects(startAgent(notReady, { name: "w", kind: "claude" }, ORCHESTRATOR), /agent_not_ready; compensation closed created pane/);
 
 	const closeFails = fakeHost(herdr({ start: () => "throw", close: () => ok({ type: "nope" }) }));
-	await assert.rejects(startAgent(closeFails, { name: "w" }, ORCHESTRATOR), /transport failure or timeout; compensation failed: malformed Herdr response: expected ok/);
+	await assert.rejects(startAgent(closeFails, { name: "w" }, ORCHESTRATOR), /agent startup: Herdr transport failure; compensation failed: compensation: malformed Herdr response: expected ok/);
 
 	const uncertain = fakeHost(herdr({ create: () => "throw" }));
 	await assert.rejects(startAgent(uncertain, { name: "w" }, ORCHESTRATOR), /creation outcome is uncertain and no pane was closed/);
 	assert.equal(uncertain.calls.length, 1);
 
 	const unproven = fakeHost(herdr({ create: () => ok({ type: "tab_created" }) }));
-	await assert.rejects(startAgent(unproven, { name: "w" }, ORCHESTRATOR), /ownership was not proven/);
+	await assert.rejects(startAgent(unproven, { name: "w" }, ORCHESTRATOR), /ownership was not proven; creation outcome is uncertain and no pane was closed/);
 	assert.equal(unproven.calls.length, 1);
 
 	const noTab = fakeHost(herdr({ create: () => ok({ type: "tab_created", root_pane: { pane_id: "w:p2" } }) }));
-	await assert.rejects(startAgent(noTab, { name: "w" }, ORCHESTRATOR), /missing tab.tab_id; compensation closed created pane/);
+	await assert.rejects(startAgent(noTab, { name: "w" }, ORCHESTRATOR), /malformed create response: missing tab; compensation closed created pane/);
 	assert.deepEqual(noTab.calls.at(-1), ["pane", "close", "w:p2"]);
 
 	const layoutRefused = fakeHost(herdr({ create: () => ({ exitCode: 1, stdout: "", stderr: '{"code":"workspace_not_found"}' }) }));
@@ -207,7 +211,7 @@ async function childReportChecks(): Promise<void> {
 
 export async function claudeModChecks(): Promise<void> {
 	contextChecks();
-	validationChecks();
+	await validationChecks();
 	await claudeStartChecks();
 	await piStartChecks();
 	await rollbackChecks();

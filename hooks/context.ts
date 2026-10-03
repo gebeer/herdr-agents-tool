@@ -1,4 +1,4 @@
-import { herdrId } from './herdr.ts'
+import { herdrId } from '../core/herdr.ts'
 
 /** Variables the orchestrator sets on a Claude child's pane; register.ts reads them back by literal name. */
 export const PARENT_PANE_ENV = 'HERDR_AGENTS_PARENT_PANE'
