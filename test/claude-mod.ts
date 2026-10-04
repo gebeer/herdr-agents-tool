@@ -33,7 +33,7 @@ function herdr(overrides: Partial<Record<"create" | "start" | "prompt" | "close"
 			});
 		}
 		if (noun === "agent" && verb === "prompt") {
-			return overrides.prompt?.(args) ?? ok({ type: "agent_prompted", agent: { name: args[2], pane_id: "w:p2", agent: "claude" } });
+			return overrides.prompt?.(args) ?? ok({ type: "agent_prompted", agent: { name: "worker", pane_id: "w:p2", agent: "claude" } });
 		}
 		if (noun === "pane" && verb === "close") return overrides.close?.(args) ?? ok({ type: "ok" });
 		throw new Error(`unexpected herdr call: ${args.join(" ")}`);
@@ -109,7 +109,7 @@ async function claudeStartChecks(): Promise<void> {
 	assert.deepEqual(start!.slice(0, 9), ["agent", "start", "worker", "--kind", "claude", "--pane", "w:p2", "--timeout", "30000"]);
 	const argv = start!.slice(start!.indexOf("--") + 1);
 	assert.deepEqual(argv, ["--name", "worker", "--model", "opus", "--effort", "high", "--permission-mode", "bypassPermissions", "--plugin-dir", "/plugin"]);
-	assert.deepEqual(prompt, ["agent", "prompt", "worker", "Do it."]);
+	assert.deepEqual(prompt, ["agent", "prompt", "w:p2", "Do it."]);
 	assert.equal(host.calls.length, 3);
 
 	const bare = fakeHost(herdr());
@@ -126,7 +126,7 @@ async function claudeStartChecks(): Promise<void> {
 }
 
 async function piStartChecks(): Promise<void> {
-	const host = fakeHost(herdr({ prompt: (args) => ok({ type: "agent_prompted", agent: { name: args[2], pane_id: "w:p2", agent: "pi" } }) }), piFiles);
+	const host = fakeHost(herdr({ prompt: (args) => ok({ type: "agent_prompted", agent: { name: "piworker", pane_id: "w:p2", agent: "pi" } }) }), piFiles);
 	const text = await startAgent(host, { name: "piworker", kind: "pi", model: "terra", prompt: "Go." }, ORCHESTRATOR);
 	assert.deepEqual(JSON.parse(text), { name: "piworker", kind: "pi", pane: "w:p2", model: "test/terra", thinking: "medium", promptSubmitted: true });
 	assert.deepEqual(host.calls[0]!.slice(-2), ["--env", "PI_CODING_AGENT_DIR=/home/me/.pi/agent"]);

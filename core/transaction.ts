@@ -113,7 +113,7 @@ async function rolledBack(host: HerdrHost, primary: Error, paneId: string, cwd: 
 async function submitPrompt(host: HerdrHost, request: StartRequest, launch: Launch, paneId: string, prompt: string, cwd: string, signal?: AbortSignal): Promise<void> {
 	try {
 		signal?.throwIfAborted();
-		const prompted = await runHerdr(host, ["agent", "prompt", request.name, prompt], {
+		const prompted = await runHerdr(host, ["agent", "prompt", paneId, prompt], {
 			cwd, signal, timeoutMs: PROMPT_TIMEOUT_MS, stage: "prompt submission",
 		});
 		const agent = record(prompted.result.agent);

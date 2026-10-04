@@ -475,7 +475,7 @@ async function promptChecks(): Promise<void> {
 					argv: ["pi", ...args.slice(args.indexOf("--") + 1)],
 				});
 				if (args[1] === "close") return herdrResponse({ type: "ok" });
-				assert.deepEqual(args, ["agent", "prompt", agent.name, prompt]);
+				assert.deepEqual(args, ["agent", "prompt", agent.pane_id, prompt]);
 				assert.equal(options?.timeout, 10_000);
 				assert.equal(options?.signal, controller.signal);
 				if (scenario === "transport") throw new Error("transport failed");

@@ -31,7 +31,7 @@ function host(on: On, env: Record<string, string>): string[][] {
         argv: ['claude', ...args.slice(args.indexOf('--') + 1)],
       })
     }
-    return reply({ type: 'agent_prompted', agent: { name: args[2], pane_id: args[2] === 'w:p1' ? 'w:p1' : 'w:p2', agent: 'claude' } })
+    return reply({ type: 'agent_prompted', agent: { name: 'worker', pane_id: args[2], agent: 'claude' } })
   })
   return calls
 }
