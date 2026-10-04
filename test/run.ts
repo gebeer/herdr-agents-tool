@@ -1,13 +1,10 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { createAgentSessionServices, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { StartAgentError } from "../core/errors.js";
 import { runHerdr } from "../core/herdr.js";
 import { resolveModelProfile, type ModelConfig } from "../protocol/model-config.js";
-import { verifyChildProfile } from "../src/child-profile.js";
 import { piHerdrHost } from "../src/herdr-cli.js";
 import { loadModelConfig, selectProfileFromConfig, startHerdrPiAgent } from "../src/start.js";
 import type { SelectedProfile } from "../src/types.js";
@@ -17,63 +14,7 @@ import { claudeModChecks } from "./claude-mod.js";
 const previousPane = process.env.HERDR_PANE_ID;
 process.env.HERDR_PANE_ID = "w-test:parent";
 const root = mkdtempSync(join(tmpdir(), "herdr-agents-tool-test-"));
-const profile: SelectedProfile = {
-	model: "test/model",
-	thinking: "high",
-};
-
-const fakePiRuntime = join(root, "fake-pi-runtime.mjs");
-const fakeAiRuntime = join(root, "fake-pi-ai.mjs");
-
-writeFileSync(fakePiRuntime, `
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-const credentialFor = (agentDir) => JSON.parse(readFileSync(join(agentDir, "auth.json"), "utf8")).test;
-export const readStoredCredential = (_provider, authPath) => JSON.parse(readFileSync(authPath, "utf8")).test;
-export class SettingsManager {
-  static create(_cwd, _agentDir, options) {
-    if (options?.projectTrusted !== false) throw new Error("project trust was not disabled");
-    return {};
-  }
-}
-export async function createAgentSessionServices(options) {
-  const { agentDir, settingsManager, resourceLoaderOptions } = options;
-  if (!settingsManager || !resourceLoaderOptions?.noExtensions || !resourceLoaderOptions?.noSkills ||
-      !resourceLoaderOptions?.noPromptTemplates || !resourceLoaderOptions?.noThemes || !resourceLoaderOptions?.noContextFiles) {
-    throw new Error("untrusted project resources were not disabled");
-  }
-  const credential = credentialFor(agentDir);
-  const model = { provider: "test", id: "model", reasoning: true };
-  const modelRuntime = {
-    getError: () => undefined,
-    getModel: (provider, id) => provider === "test" && id === "model" ? model : undefined,
-    getAuth: async () => {
-      if (credential.type === "oauth") {
-        if (credential.expires < Date.now()) {
-          if (credential.refresh === "refresh-fails") throw new Error("refresh failed");
-          if (credential.refresh !== "refresh-ok") return undefined;
-          return { auth: { headers: { authorization: "Bearer refreshed" } }, source: "OAuth" };
-        }
-        return credential.access ? { auth: { headers: { authorization: "Bearer " + credential.access } }, source: "OAuth" } : undefined;
-      }
-      return credential.key ? { auth: { apiKey: credential.key } } : undefined;
-    },
-  };
-  return { modelRuntime };
-}
-export const resolveCliModel = ({ cliModel, modelRuntime }) => {
-  const [provider, ...id] = cliModel.split("/");
-  const model = modelRuntime.getModel(provider, id.join("/"));
-  return { model, warning: undefined, error: undefined };
-};
-`);
-writeFileSync(fakeAiRuntime, `export const getSupportedThinkingLevels = () => ["off", "minimal", "low", "medium", "high", "xhigh", "max"];\n`);
-const fakeRuntimeUrls = { codingAgent: pathToFileURL(fakePiRuntime).href, ai: pathToFileURL(fakeAiRuntime).href };
-
-function writeCredential(credential: unknown): void {
-	writeFileSync(join(root, "auth.json"), JSON.stringify({ test: credential }));
-}
-
+const profile: SelectedProfile = { model: "test/model", thinking: "high" };
 async function expectReject(work: () => Promise<unknown>, message: string): Promise<void> {
 	await assert.rejects(work, (error: unknown) => error instanceof Error && error.message.includes(message));
 }
@@ -129,12 +70,9 @@ async function profileFallbackChecks(): Promise<void> {
 	const context = {
 		modelRegistry: { find: (provider: string, id: string) => models.get(`${provider}/${id}`) },
 	} as never;
-	const checks: string[] = [];
-	const verify = async (checked: SelectedProfile): Promise<void> => { checks.push(`${checked.model}:${checked.thinking}`); };
 
-	const ordinary = await selectProfileFromConfig(context, config, "requested", undefined, root, undefined, verify);
-	assert.equal(ordinary.fallback, undefined);
-	assert.deepEqual(checks.splice(0), ["test/requested:medium"]);
+	const ordinary = selectProfileFromConfig(context, config, "requested", undefined);
+	assert.deepEqual(ordinary, { model: "test/requested", thinking: "medium" });
 
 	for (const [requested, thinking, reason] of [
 		["unknown", undefined, "invalid model"],
@@ -142,99 +80,34 @@ async function profileFallbackChecks(): Promise<void> {
 		["test/unavailable", undefined, "canonical model unavailable"],
 		["test/no-reasoning", "high", "unsupported thinking level"],
 	] as const) {
-		const selected = await selectProfileFromConfig(context, config, requested, thinking, root, undefined, verify);
+		const selected = selectProfileFromConfig(context, config, requested, thinking);
 		assert.equal(selected.model, "test/fallback");
+		assert.equal(selected.thinking, "medium");
 		assert.equal(selected.fallback?.requested.model, requested);
 		assert.match(selected.fallback?.reason ?? "", new RegExp(reason));
-		assert.deepEqual(checks.splice(0), ["test/fallback:medium"]);
 	}
 
-	const preflight = await selectProfileFromConfig(context, config, "requested", undefined, root, undefined, async (checked) => {
-		checks.push(checked.model);
-		if (checked.model === "test/requested") throw new Error("requested auth unavailable");
-	});
-	assert.equal(preflight.fallback?.reason, "requested auth unavailable");
-	assert.deepEqual(checks.splice(0), ["test/requested", "test/fallback"]);
-
-	const omitted = await selectProfileFromConfig(context, config, undefined, "high", root, undefined, verify);
+	const omitted = selectProfileFromConfig(context, config, undefined, "high");
+	assert.equal(omitted.model, "test/fallback");
 	assert.equal(omitted.thinking, "high");
 	assert.equal(omitted.fallback?.reason, "model omitted");
 	assert.deepEqual(omitted.fallback?.requested, { thinking: "high" });
-	assert.deepEqual(checks.splice(0), ["test/fallback:high"]);
 
-	const bothFailed = () => selectProfileFromConfig(context, config, "requested", undefined, root, undefined, async (checked) => {
-		throw new Error(checked.model === "test/requested" ? "requested preflight" : "fallback preflight");
-	});
-	await expectReject(bothFailed, "requested profile test/requested (medium) failed: requested preflight; fallback profile test/fallback (medium) failed: fallback preflight");
+	const broken = { ...config, fallback: { model: "test/missing", thinking: "medium" } } satisfies ModelConfig;
+	const bothFailed = () => selectProfileFromConfig(context, broken, "test/unavailable", undefined);
+	const bothFailedMessage = "requested profile test/unavailable (medium) failed: canonical model unavailable: exact provider/model-id is not known; " +
+		"fallback profile test/missing (medium) failed: canonical model unavailable: exact provider/model-id is not known";
+	assert.throws(bothFailed, (error: unknown) => error instanceof Error && error.message === bothFailedMessage);
 
 	let layoutCalls = 0;
 	await expectReject(() => startHerdrPiAgent(
 		{ exec: async () => { layoutCalls++; throw new Error("must not mutate layout"); } } as never,
-		{ name: "fallbackfailure", placement: "workspace", model: "requested" },
+		{ name: "fallbackfailure", placement: "workspace", model: "test/unavailable" },
 		undefined,
 		{ cwd: root } as never,
 		bothFailed,
-	), "requested profile test/requested (medium) failed: requested preflight; fallback profile test/fallback (medium) failed: fallback preflight");
+	), bothFailedMessage);
 	assert.equal(layoutCalls, 0, "both profile failures must happen before layout mutation");
-}
-
-async function untrustedProjectCheck(): Promise<void> {
-	const project = join(root, "untrusted-project");
-	const marker = join(root, "untrusted-extension-ran");
-	mkdirSync(join(project, ".pi", "extensions"), { recursive: true });
-	writeFileSync(join(project, ".pi", "extensions", "marker.ts"), `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "ran");\n`);
-	await createAgentSessionServices({
-		cwd: project,
-		agentDir: root,
-		settingsManager: SettingsManager.create(project, root, { projectTrusted: false }),
-		resourceLoaderOptions: {
-			noExtensions: true,
-			noSkills: true,
-			noPromptTemplates: true,
-			noThemes: true,
-			noContextFiles: true,
-		},
-	});
-	assert.equal(existsSync(marker), false, "untrusted project extension must not execute during preflight");
-}
-
-async function commandAuthCheck(): Promise<void> {
-	const commandProfile = join(root, "command-auth-profile");
-	const marker = join(root, "command-auth-ran");
-	mkdirSync(commandProfile, { recursive: true });
-	writeFileSync(join(commandProfile, "auth.json"), JSON.stringify({ command: { type: "api_key", key: "stored-literal" } }));
-	writeFileSync(join(commandProfile, "models.json"), JSON.stringify({
-		providers: {
-			command: {
-				baseUrl: "http://127.0.0.1:1/v1",
-				api: "openai-completions",
-				headers: { Authorization: `!${process.execPath} -e 'require("node:fs").writeFileSync(${JSON.stringify(marker)}, "ran")'` },
-				models: [{
-					id: "model", name: "Command model", reasoning: true, input: ["text"],
-					contextWindow: 1_024, maxTokens: 128, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-				}],
-			},
-		},
-	}));
-	await expectReject(() => verifyChildProfile({
-		model: "command/model",
-		thinking: "high",
-	}, commandProfile, root, undefined), "must not use environment- or command-sourced provider/model configuration");
-	assert.equal(existsSync(marker), false, "command-backed model auth must not execute during preflight");
-}
-
-async function childProfileChecks(): Promise<void> {
-	writeCredential({ type: "oauth", access: "old", refresh: "refresh-ok", expires: Date.now() - 1 });
-	await verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls);
-
-	writeCredential({ type: "oauth", access: "", refresh: "refresh-ok", expires: Date.now() + 60_000 });
-	await expectReject(() => verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls), "stored literal API key or OAuth credential");
-
-	writeCredential({ type: "oauth", access: "old", refresh: "refresh-fails", expires: Date.now() - 1 });
-	await expectReject(() => verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls), "refresh failed");
-
-	writeCredential({ type: "oauth", access: "valid", refresh: "refresh-unused", expires: Date.now() + 3_600_000 });
-	await verifyChildProfile(profile, root, root, undefined, fakeRuntimeUrls);
 }
 
 async function herdrEnvelopeChecks(): Promise<void> {
@@ -275,7 +148,7 @@ function herdrResponse(result: Record<string, unknown>): { code: number; killed:
 }
 
 async function placementAndCompensationChecks(): Promise<void> {
-	const selectProfile = async (): Promise<SelectedProfile> => profile;
+	const selectProfile = (): SelectedProfile => profile;
 	for (const scenario of [
 		{
 			input: { name: "panecheck", placement: "pane" },
@@ -348,7 +221,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 		{ name: "fallbackcheck", placement: "pane", model: "missing", thinking: "high" },
 		undefined,
 		{ cwd: root } as never,
-		async () => fallbackProfile,
+		() => fallbackProfile,
 	);
 	assert.deepEqual(JSON.parse(fallbackStarted.text).fallback, fallbackProfile.fallback);
 	assert.deepEqual(fallbackStarted.details.fallback, fallbackProfile.fallback);
@@ -412,7 +285,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 async function claudeKindChecks(): Promise<void> {
 	const pluginRoot = join(import.meta.dirname, "..");
 	let profileCalls = 0;
-	const selectProfile = async (): Promise<SelectedProfile> => { profileCalls++; return profile; };
+	const selectProfile = (): SelectedProfile => { profileCalls++; return profile; };
 	for (const scenario of [
 		{ input: { name: "claudecheck", model: "opus", thinking: "high" }, flags: ["--model", "opus", "--effort", "high"], reported: { model: "opus", thinking: "high" } },
 		{ input: { name: "claudebare" }, flags: [], reported: {} },
@@ -494,7 +367,7 @@ async function promptChecks(): Promise<void> {
 				};
 			},
 		};
-		const run = () => startHerdrPiAgent(pi, { name: agent.name, placement: "pane", prompt }, controller.signal, { cwd: root } as never, async () => profile);
+		const run = () => startHerdrPiAgent(pi, { name: agent.name, placement: "pane", prompt }, controller.signal, { cwd: root } as never, () => profile);
 		if (scenario === "success") {
 			const result = await run();
 			assert.equal(result.details.promptSubmitted, true);
@@ -513,9 +386,6 @@ async function promptChecks(): Promise<void> {
 try {
 	modelConfigChecks();
 	await profileFallbackChecks();
-	await untrustedProjectCheck();
-	await commandAuthCheck();
-	await childProfileChecks();
 	await herdrEnvelopeChecks();
 	await inputValidationChecks();
 	await placementAndCompensationChecks();
@@ -523,7 +393,7 @@ try {
 	await promptChecks();
 	await childNotifyChecks();
 	await claudeModChecks();
-	console.log("unit checks passed: child trust/auth, Herdr envelopes, placements, compensation, runtime input validation, and the Claude Code mod core");
+	console.log("unit checks passed: model profiles, Herdr envelopes, placements, compensation, runtime input validation, and the Claude Code mod core");
 } finally {
 	rmSync(root, { recursive: true, force: true });
 	if (previousPane === undefined) delete process.env.HERDR_PANE_ID;

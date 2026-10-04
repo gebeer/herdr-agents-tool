@@ -8,14 +8,7 @@ The same repository is also a Claude Code plugin (a mod) that gives a Claude Cod
 
 ## Loading
 
-Install the declared Pi runtime peers beside a directly copied package before loading it:
-
-```bash
-cd /home/gbr/.pi/extensions/herdr_agents_tool
-npm install --omit=dev --no-package-lock
-```
-
-Without that local install, the isolated child-profile preflight cannot resolve Pi's runtime modules.
+Pi supplies its own runtime packages to extensions, so loading needs no install. `npm install` is only for typechecking and tests.
 
 ```json
 {
@@ -57,11 +50,13 @@ herdr_start_agent({
 
 Placement defaults to a new tab in the orchestrator's workspace. Use `placement: "pane"` only when the user explicitly requests a split pane; it splits the orchestrator's own pane, and `direction` then defaults to `"right"`.
 
-`kind: "claude"` starts a Claude Code child instead of a pi one, loading this repository as its plugin so it reports back like the mod's Claude children. `model` and `thinking` go to Claude Code as given, with no profile selection, preflight, or fallback. These children always run with `--permission-mode bypassPermissions`, since pi has no permission modes: rely on your damage-control hooks, not on permission prompts.
+`kind: "claude"` starts a Claude Code child instead of a pi one, loading this repository as its plugin so it reports back like the mod's Claude children. `model` and `thinking` go to Claude Code as given, with no profile selection or fallback. These children always run with `--permission-mode bypassPermissions`, since pi has no permission modes: rely on your damage-control hooks, not on permission prompts.
 
-`name` must match `[a-z][a-z0-9_-]{0,31}`. A configured alias expands before registry lookup, child-profile preflight, and Herdr launch. An explicit thinking value overrides that alias's default. An exact `provider/model-id` uses the fallback thinking value when thinking is omitted.
+`name` must match `[a-z][a-z0-9_-]{0,31}`. A configured alias expands before registry lookup and Herdr launch. An explicit thinking value overrides that alias's default. An exact `provider/model-id` uses the fallback thinking value when thinking is omitted.
 
-The requested profile is checked first. If its model is malformed, unknown, unavailable, incompatible with the thinking level, or rejected by child-profile preflight/auth, the configured fallback profile is checked before Herdr changes the layout. Omitting `model` selects the fallback directly; an explicit `thinking` still overrides its default. Automatic fallback use is reported in both tool text and details with the requested profile (when available), selected fallback profile, and reason. If fallback also fails, the error includes both failures and no pane, tab, or workspace is created. Invalid configuration, other invalid tool input, invalid cwd/Herdr context, and failures after layout creation do not trigger fallback.
+The requested profile is checked first. If its model is malformed, unknown, unavailable, or incompatible with the thinking level, the configured fallback profile is checked before Herdr changes the layout. Omitting `model` selects the fallback directly; an explicit `thinking` still overrides its default. Automatic fallback use is reported in both tool text and details with the requested profile (when available), selected fallback profile, and reason. If fallback also fails, the error includes both failures and no pane, tab, or workspace is created. Invalid configuration, other invalid tool input, invalid cwd/Herdr context, and failures after layout creation do not trigger fallback.
+
+The check uses the orchestrator's pi model registry, so models from extension-provided providers are known. It does not check auth: a missing or expired login surfaces in the child's pane.
 
 Every new pane explicitly sets `PI_CODING_AGENT_DIR=$HOME/.pi/agent` through Herdr's `--env`, so child agents use the default Pi profile even when the orchestrator or Herdr server uses another profile (such as `pi-clawa`). This does not change the requested working directory or configured model profile.
 
@@ -83,7 +78,7 @@ Herdr remains the authority for layout and interactive readiness. On startup fai
 
 Prompt submission is outside startup rollback. On a prompt error, timeout, cancellation, or malformed acknowledgement, the tool leaves the agent running and reports its name and pane. Delivery may be uncertain: inspect the agent before retrying; the tool never retries automatically.
 
-Before layout mutation, a Pi subprocess checks the default profile with an explicitly untrusted settings manager and all project-local resources disabled, so caller-controlled `.pi` settings, packages, extensions, skills, prompts, themes, and context cannot execute during preflight. The checker requires the exact model, requested thinking level, and usable stored profile-local request auth (including bounded OAuth refresh/auth derivation). It rejects selected-provider/model `models.json` API-key or header values backed by environment interpolation or commands before auth resolution, then requires final auth to derive solely from the validated stored credential. A successful Herdr readiness response still means only that the child is ready for input, not that a provider request has succeeded.
+A successful Herdr readiness response still means only that the child is ready for input, not that a provider request has succeeded.
 
 ## Claude Code mod
 
@@ -111,7 +106,7 @@ start_agent({
 
 `placement`, `workspace`, `direction`, `cwd`, `name`, and `prompt` behave as in the pi tool. Omitting `model` gives Claude children the user's configured model, and pi children the configured fallback profile.
 
-Pi children are launched with exactly the arguments the pi orchestrator uses (`protocol/pi-child.ts`), including `src/child-notify.ts`. Their profiles come from the global `~/.pi/agent/herdr-agents.json`, parsed by the same rules (`protocol/model-config.ts`). The mod cannot reach pi's model registry, auth, or project trust, so it skips the child-profile preflight, automatic fallback, and project-level configuration: a bad model or missing auth surfaces in the child's pane.
+Pi children are launched with exactly the arguments the pi orchestrator uses (`protocol/pi-child.ts`), including `src/child-notify.ts`. Their profiles come from the global `~/.pi/agent/herdr-agents.json`, parsed by the same rules (`protocol/model-config.ts`). The mod cannot reach pi's model registry, auth, or project trust, so it skips the registry check, automatic fallback, and project-level configuration: a bad model or missing auth surfaces in the child's pane.
 
 Herdr types the child command into the new pane's shell, so a shell alias or function named `claude` applies to children too: a wrapper that adds `--dangerously-skip-permissions` overrides `permissionMode`. The plugin passes no `--append-system-prompt` (Claude Code keeps only the last one), so a prompt the wrapper appends survives beside the subagent section. A child that also loads this plugin through `CLAUDE_CODE_PLUGIN_DIRS` loads it once, not twice.
 

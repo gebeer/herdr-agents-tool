@@ -21,7 +21,6 @@ import {
 	type RequestedThinking,
 } from "../protocol/model-config.js";
 import { piChildArgv } from "../protocol/pi-child.js";
-import { verifyChildProfile } from "./child-profile.js";
 import { piHerdrHost, resolveHerdrBinary } from "./herdr-cli.js";
 import type { SelectedProfile, StartResultDetails } from "./types.js";
 
@@ -77,29 +76,22 @@ function selectThinking(model: Model<any>, thinking: RequestedThinking): Request
 	return thinking;
 }
 
-export async function selectProfileFromConfig(
+/** The requested profile if pi's registry knows it, else the configured fallback. */
+export function selectProfileFromConfig(
 	ctx: ExtensionContext,
 	config: ModelConfig,
 	requestedModel: string | undefined,
 	requestedThinking: RequestedThinking | undefined,
-	cwd: string,
-	signal: AbortSignal | undefined,
-	verifyProfile: typeof verifyChildProfile = verifyChildProfile,
-): Promise<SelectedProfile> {
-	const check = async (candidate: ModelProfile): Promise<SelectedProfile> => {
+): SelectedProfile {
+	const check = (candidate: ModelProfile): SelectedProfile => {
 		const model = selectModel(ctx, candidate.model);
-		const profile = {
-			model: canonicalModelString(model),
-			thinking: selectThinking(model, candidate.thinking),
-		};
-		await verifyProfile(profile, DEFAULT_AGENT_DIR, cwd, signal);
-		return profile;
+		return { model: canonicalModelString(model), thinking: selectThinking(model, candidate.thinking) };
 	};
 
 	const requested = resolveModelProfile(config, requestedModel, requestedThinking);
 	if (requestedModel === undefined) {
 		try {
-			const selected = await check(requested);
+			const selected = check(requested);
 			return {
 				...selected,
 				fallback: {
@@ -115,11 +107,11 @@ export async function selectProfileFromConfig(
 	}
 
 	try {
-		return await check(requested);
+		return check(requested);
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : "profile validation failed";
 		try {
-			const selected = await check(config.fallback);
+			const selected = check(config.fallback);
 			return {
 				...selected,
 				fallback: {
@@ -142,14 +134,12 @@ function selectProfile(
 	ctx: ExtensionContext,
 	requestedModel: string | undefined,
 	requestedThinking: RequestedThinking | undefined,
-	cwd: string,
-	signal: AbortSignal | undefined,
-): Promise<SelectedProfile> {
+): SelectedProfile {
 	// Trust is evaluated for the orchestrator's project, so that is where project config comes from.
-	return selectProfileFromConfig(ctx, loadModelConfig(ctx.cwd, ctx.isProjectTrusted()), requestedModel, requestedThinking, cwd, signal);
+	return selectProfileFromConfig(ctx, loadModelConfig(ctx.cwd, ctx.isProjectTrusted()), requestedModel, requestedThinking);
 }
 
-/** Claude children skip profile selection and preflight: Claude Code takes the model and effort as given. */
+/** Claude children skip profile selection: Claude Code takes the model and effort as given. */
 function claudeLaunch(request: StartRequest, parentPane: string) {
 	try {
 		return { kind: "claude", ...claudeChildLaunch(request.name, parentPane, PLUGIN_ROOT, request.model, request.thinking, "bypassPermissions") };
@@ -158,7 +148,7 @@ function claudeLaunch(request: StartRequest, parentPane: string) {
 	}
 }
 
-/** Pi's start tool: pi profile selection and preflight (pi children only), then the shared Herdr transaction. */
+/** Pi's start tool: pi profile selection (pi children only), then the shared Herdr transaction. */
 export async function startHerdrPiAgent(
 	pi: Pick<ExtensionAPI, "exec">,
 	input: Record<string, unknown>,
@@ -177,7 +167,7 @@ export async function startHerdrPiAgent(
 	if (kind === "claude") {
 		launch = claudeLaunch(request, parentPane);
 	} else {
-		profile = await select(ctx, request.model, request.thinking, cwd, signal);
+		profile = select(ctx, request.model, request.thinking);
 		const argv = piChildArgv({ name: request.name, model: profile.model, thinking: profile.thinking, parentPane, pluginRoot: PLUGIN_ROOT });
 		launch = { kind: "pi", argv, env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } };
 	}
