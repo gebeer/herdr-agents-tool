@@ -13,6 +13,7 @@ function host(on: On, env: Record<string, string>): string[][] {
   const calls: string[][] = []
   mock.env(on, env)
   on('session.cwd', () => ({ value: '/work' }))
+  on('session.surfaces', () => ({ value: ['terminal'] }))
   on('fs.stat', () => ({ value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false, realPath: '/work' } }))
   on('fs.exists', () => ({ value: false }))
   on('ui.toast', () => ({ value: undefined }))

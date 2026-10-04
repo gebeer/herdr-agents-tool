@@ -54,7 +54,7 @@ async function readContext($: EngineInterface) {
     HERDR_WORKSPACE_ID: await $.env.get('HERDR_WORKSPACE_ID'),
     HERDR_AGENTS_PARENT_PANE: await $.env.get('HERDR_AGENTS_PARENT_PANE'),
     HERDR_AGENTS_NAME: await $.env.get('HERDR_AGENTS_NAME'),
-  })
+  }, (await $.session.surfaces()).includes('terminal'))
 }
 
 async function readHost($: EngineInterface): Promise<Host> {

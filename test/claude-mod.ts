@@ -65,13 +65,14 @@ const piFiles = { "/home/me/.pi/agent/herdr-agents.json": PI_CONFIG };
 
 function contextChecks(): void {
 	const base = { HERDR_ENV: "1", HERDR_PANE_ID: "w:p1", HERDR_WORKSPACE_ID: "w", HERDR_AGENTS_PARENT_PANE: undefined, HERDR_AGENTS_NAME: undefined };
-	assert.deepEqual(herdrContext(base), { role: "orchestrator", pane: "w:p1", workspace: "w" });
-	assert.deepEqual(herdrContext({ ...base, HERDR_AGENTS_PARENT_PANE: "w:p0", HERDR_AGENTS_NAME: "worker" }), {
-		role: "child", pane: "w:p1", parentPane: "w:p0", name: "worker",
-	});
-	assert.equal(herdrContext({ ...base, HERDR_ENV: undefined }), undefined);
-	assert.equal(herdrContext({ ...base, HERDR_PANE_ID: " w:p1" }), undefined);
-	assert.equal(herdrContext({ ...base, HERDR_WORKSPACE_ID: undefined }), undefined);
+	const child = { ...base, HERDR_AGENTS_PARENT_PANE: "w:p0", HERDR_AGENTS_NAME: "worker" };
+	assert.deepEqual(herdrContext(base, true), { role: "orchestrator", pane: "w:p1", workspace: "w" });
+	assert.deepEqual(herdrContext(child, true), { role: "child", pane: "w:p1", parentPane: "w:p0", name: "worker" });
+	assert.equal(herdrContext(child, false), undefined, "a headless claude in a child pane is not the child");
+	assert.equal(herdrContext({ ...child, HERDR_AGENTS_PARENT_PANE: "w:p1" }, true), undefined, "a child cannot report to its own pane");
+	assert.equal(herdrContext({ ...base, HERDR_ENV: undefined }, true), undefined);
+	assert.equal(herdrContext({ ...base, HERDR_PANE_ID: " w:p1" }, true), undefined);
+	assert.equal(herdrContext({ ...base, HERDR_WORKSPACE_ID: undefined }, true), undefined);
 }
 
 async function validationChecks(): Promise<void> {

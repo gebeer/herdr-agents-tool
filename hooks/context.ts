@@ -15,12 +15,18 @@ export type HerdrContext =
   | { role: 'orchestrator'; pane: string; workspace: string }
   | { role: 'child'; pane: string; parentPane: string; name: string | undefined }
 
-/** Undefined outside a Herdr-managed pane: the plugin then does nothing. */
-export function herdrContext(env: HerdrEnv): HerdrContext | undefined {
+/**
+ * Undefined outside a Herdr-managed pane: the plugin then does nothing. The parent-pane
+ * env is inherited by everything in a child pane, so only the interactive session in it
+ * is the child; anything else there (e.g. `claude -p` from its Bash) gets no role.
+ */
+export function herdrContext(env: HerdrEnv, interactive: boolean): HerdrContext | undefined {
   const pane = herdrId(env.HERDR_PANE_ID)
   if (env.HERDR_ENV !== '1' || !pane) return undefined
   const parentPane = herdrId(env[PARENT_PANE_ENV])
-  if (parentPane) return { role: 'child', pane, parentPane, name: env[AGENT_NAME_ENV] }
+  if (parentPane) {
+    return interactive && parentPane !== pane ? { role: 'child', pane, parentPane, name: env[AGENT_NAME_ENV] } : undefined
+  }
   const workspace = herdrId(env.HERDR_WORKSPACE_ID)
   return workspace ? { role: 'orchestrator', pane, workspace } : undefined
 }
