@@ -17,7 +17,7 @@ declare module 'claude-code' {
 
 export const START_TOOL: ToolSpec = {
   name: 'start_agent',
-  description: 'Start one Claude Code or pi agent in a new Herdr pane, tab, or workspace. In Herdr, use this tool to start agents in new locations, not direct herdr CLI commands. Include an initial task prompt unless the user explicitly requests an agent without one. This tool does not wait for task completion. The child automatically injects a subagent report into your session; do not poll for results.',
+  description: 'Start one Claude Code or pi agent in a new Herdr pane, tab, or workspace. In Herdr, use this tool to start agents in new locations, not direct herdr CLI commands. If you ever run `herdr tab create` yourself, always pass `--workspace $HERDR_WORKSPACE_ID`; without it Herdr uses whichever workspace the user has focused. Include an initial task prompt unless the user explicitly requests an agent without one. This tool does not wait for task completion. The child automatically injects a subagent report into your session; do not poll for results.',
   inputSchema: {
     type: 'object',
     additionalProperties: false,
