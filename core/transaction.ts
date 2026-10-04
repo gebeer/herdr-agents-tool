@@ -7,6 +7,8 @@ const START_TIMEOUT_MS = 35_000;
 const HERDR_READY_TIMEOUT_MS = 30_000;
 const PROMPT_TIMEOUT_MS = 10_000;
 const COMPENSATION_TIMEOUT_MS = 5_000;
+const SCREEN_TIMEOUT_MS = 3_000;
+const SCREEN_MAX_CHARS = 1_500;
 
 /** How Herdr starts one child: its agent kind, the arguments after its executable, and its pane's env. */
 export type Launch = {
@@ -102,11 +104,29 @@ async function compensate(host: HerdrHost, paneId: string, cwd: string): Promise
 	}
 }
 
-async function rolledBack(host: HerdrHost, primary: Error, paneId: string, cwd: string): Promise<Error> {
+/**
+ * Best-effort tail of the pane's visible screen, read before it closes, so the caller sees what
+ * blocked startup (such as a folder-trust prompt). Never throws; the text is reported, not interpreted.
+ */
+async function screenBeforeClose(host: HerdrHost, paneId: string, cwd: string): Promise<string> {
+	try {
+		const ran = await host.run(
+			[host.herdrBinary, "pane", "read", paneId, "--source", "visible", "--lines", "20", "--format", "text"],
+			{ cwd, timeoutMs: SCREEN_TIMEOUT_MS },
+		);
+		if (ran.exitCode !== 0 || ran.interrupted) return "";
+		const text = ran.stdout.replace(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/g, "").replace(/ +$/gm, "").trim();
+		return text ? `; screen before close:\n${text.slice(-SCREEN_MAX_CHARS)}` : "";
+	} catch {
+		return "";
+	}
+}
+
+async function rolledBack(host: HerdrHost, primary: Error, paneId: string, cwd: string, detail = ""): Promise<Error> {
 	const cleanupFailure = await compensate(host, paneId, cwd);
 	return cleanupFailure
-		? new Error(`${primary.message}; compensation failed for pane ${paneId}: ${cleanupFailure}`)
-		: new Error(`${primary.message}; compensation closed created pane`);
+		? new Error(`${primary.message}; compensation failed for pane ${paneId}: ${cleanupFailure}${detail}`)
+		: new Error(`${primary.message}; compensation closed created pane${detail}`);
 }
 
 /** Once ready, the agent is never rolled back or retried: a failed acknowledgement may hide delivered work. */
@@ -165,7 +185,8 @@ export async function startInNewLocation(
 		validateAgentStarted(response.result, request.name, owned.paneId, launch);
 		started = response.result;
 	} catch (error) {
-		throw await rolledBack(host, error instanceof Error ? error : new Error("agent startup failed"), owned.paneId, cwd);
+		const screen = signal?.aborted ? "" : await screenBeforeClose(host, owned.paneId, cwd);
+		throw await rolledBack(host, error instanceof Error ? error : new Error("agent startup failed"), owned.paneId, cwd, screen);
 	}
 
 	if (request.prompt !== undefined) await submitPrompt(host, request, launch, owned.paneId, request.prompt, cwd, signal);

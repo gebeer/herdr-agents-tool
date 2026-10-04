@@ -374,7 +374,7 @@ async function promptChecks(): Promise<void> {
 			assert.deepEqual(JSON.parse(result.text), { name: agent.name, pane: agent.pane_id, promptSubmitted: true });
 		} else if (scenario === "not-ready") {
 			await expectReject(run, "agent_not_ready");
-			assert.deepEqual(calls[2], ["pane", "close", agent.pane_id]);
+			assert.deepEqual(calls.slice(2).map((args) => args.slice(0, 3)), [["pane", "read", agent.pane_id], ["pane", "close", agent.pane_id]]);
 		} else {
 			await expectReject(run, `agent ${agent.name} in pane ${agent.pane_id} left running; prompt delivery may be uncertain`);
 			assert.equal(calls.some((args) => args[1] === "close"), false, scenario);

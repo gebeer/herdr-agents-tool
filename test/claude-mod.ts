@@ -18,7 +18,7 @@ type Responder = (args: string[]) => RunResult | "throw";
 const ok = (result: Record<string, unknown>): RunResult => ({ exitCode: 0, stdout: JSON.stringify({ id: "r", result }), stderr: "" });
 
 /** A Herdr that creates tab w:t2 with root pane w:p2 and starts whatever it is asked to. */
-function herdr(overrides: Partial<Record<"create" | "start" | "prompt" | "close", Responder>> = {}): Responder {
+function herdr(overrides: Partial<Record<"create" | "start" | "prompt" | "close" | "read", Responder>> = {}): Responder {
 	return (args) => {
 		const [noun, verb] = args;
 		if (noun === "tab" || noun === "pane" && verb === "split" || noun === "workspace") {
@@ -36,6 +36,7 @@ function herdr(overrides: Partial<Record<"create" | "start" | "prompt" | "close"
 			return overrides.prompt?.(args) ?? ok({ type: "agent_prompted", agent: { name: "worker", pane_id: "w:p2", agent: "claude" } });
 		}
 		if (noun === "pane" && verb === "close") return overrides.close?.(args) ?? ok({ type: "ok" });
+		if (noun === "pane" && verb === "read" && overrides.read) return overrides.read(args);
 		throw new Error(`unexpected herdr call: ${args.join(" ")}`);
 	};
 }
@@ -163,6 +164,17 @@ async function rollbackChecks(): Promise<void> {
 
 	const notReady = fakeHost(herdr({ start: (args) => ok({ type: "agent_started", agent: { name: args[2], pane_id: "w:p2", agent: "claude", interactive_ready: false } }) }));
 	await assert.rejects(startAgent(notReady, { name: "w", kind: "claude" }, ORCHESTRATOR), /agent_not_ready; compensation closed created pane/);
+
+	// A startup prompt blocks readiness: its screen reaches the caller before the pane closes.
+	const trustPrompt = fakeHost(herdr({
+		start: () => ({ exitCode: 1, stdout: JSON.stringify({ error: { code: "agent_not_ready" } }), stderr: "" }),
+		read: () => ({ exitCode: 0, stdout: " Do you trust the files in this folder?   \r\n /home/me\n\n", stderr: "" }),
+	}));
+	await assert.rejects(
+		startAgent(trustPrompt, { name: "w", kind: "claude" }, ORCHESTRATOR),
+		(error: Error) => error.message === "agent startup: Herdr agent_not_ready; compensation closed created pane; screen before close:\nDo you trust the files in this folder?\n /home/me",
+	);
+	assert.deepEqual(trustPrompt.calls.slice(-2).map(([noun, verb, pane]) => `${noun} ${verb} ${pane}`), ["pane read w:p2", "pane close w:p2"]);
 
 	const closeFails = fakeHost(herdr({ start: () => "throw", close: () => ok({ type: "nope" }) }));
 	await assert.rejects(startAgent(closeFails, { name: "w" }, ORCHESTRATOR), /agent startup: Herdr transport failure; compensation failed for pane w:p2: compensation: malformed Herdr response: expected ok/);

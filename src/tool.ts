@@ -14,7 +14,7 @@ const schema = Type.Object(
 		placement: Type.Optional(StringEnum(PLACEMENTS, { description: "Defaults to tab. Use pane only when the user explicitly requests a split pane; it splits the calling agent's own pane." })),
 		workspace: Type.Optional(Type.String({ description: "Workspace ID for tab placement." })),
 		direction: Type.Optional(StringEnum(DIRECTIONS, { description: "Pane split direction." })),
-		cwd: Type.Optional(Type.String({ description: "Existing directory for the new location." })),
+		cwd: Type.Optional(Type.String({ description: "Existing directory for the new location. A claude agent needs a folder Claude Code already trusts; $HOME never stays trusted." })),
 		model: Type.Optional(Type.String({ description: "claude: Claude Code model alias or ID (opus, sonnet, ...); defaults to the user's configured model. pi: configured alias or exact provider/model-id; defaults to the configured fallback model." })),
 		thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: "Thinking effort. Overrides the alias or fallback default; for pi 'sol high', pass model 'sol' and thinking 'high'. claude accepts low, medium, high, xhigh, max." })),
 	},

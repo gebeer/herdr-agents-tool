@@ -29,7 +29,7 @@ export const START_TOOL: ToolSpec = {
       placement: { type: 'string', enum: PLACEMENTS, description: 'Defaults to tab. Use pane only when the user explicitly requests a split pane; it splits the calling agent\'s own pane.' },
       workspace: { type: 'string', description: 'Workspace ID for tab placement. Defaults to the current workspace.' },
       direction: { type: 'string', enum: DIRECTIONS, description: 'Pane split direction. Defaults to right.' },
-      cwd: { type: 'string', description: 'Existing directory for the new location. Defaults to the session directory.' },
+      cwd: { type: 'string', description: 'Existing directory for the new location. Defaults to the session directory. A claude agent needs a folder Claude Code already trusts; $HOME never stays trusted.' },
       model: { type: 'string', description: 'claude: Claude Code model alias or ID (opus, sonnet, ...); defaults to the user\'s configured model. pi: configured alias from ~/.pi/agent/herdr-agents.json or exact provider/model-id; defaults to the configured fallback.' },
       thinking: { type: 'string', enum: THINKING_LEVELS, description: 'Thinking effort; overrides the alias or default. claude accepts low, medium, high, xhigh, max.' },
       permissionMode: { type: 'string', enum: PERMISSION_MODES, description: 'claude only. Defaults to bypassPermissions.' },
