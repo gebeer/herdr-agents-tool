@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { StartAgentError } from "../core/errors.js";
 import { runHerdr } from "../core/herdr.js";
 import { resolveModelProfile, type ModelConfig } from "../protocol/model-config.js";
@@ -182,7 +183,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 			},
 		};
 		const started = await startHerdrPiAgent(pi as never, scenario.input as never, undefined, { cwd: root } as never, selectProfile);
-		assert.deepEqual(calls[0]?.args, [...scenario.createArgs, "--env", `PI_CODING_AGENT_DIR=${join(homedir(), ".pi", "agent")}`]);
+		assert.deepEqual(calls[0]?.args, [...scenario.createArgs, "--env", `PI_CODING_AGENT_DIR=${getAgentDir()}`]);
 		assert.equal(calls[0]?.timeout, 10_000);
 		assert.deepEqual(calls[1]?.args.slice(0, 8), ["agent", "start", scenario.input.name, "--kind", "pi", "--pane", scenario.pane, "--timeout"]);
 		const launchArgs = calls[1]!.args;
@@ -267,7 +268,7 @@ async function placementAndCompensationChecks(): Promise<void> {
 	};
 	await expectReject(() => startHerdrPiAgent(latePi as never, { name: "lateabort", placement: "workspace" } as never, lateAbort.signal, { cwd: root } as never, selectProfile), "layout create: aborted; compensation closed created pane");
 	assert.deepEqual(lateCalls, [
-		["workspace", "create", "--cwd", root, "--label", "lateabort", "--no-focus", "--env", `PI_CODING_AGENT_DIR=${join(homedir(), ".pi", "agent")}`],
+		["workspace", "create", "--cwd", root, "--label", "lateabort", "--no-focus", "--env", `PI_CODING_AGENT_DIR=${getAgentDir()}`],
 		["pane", "close", "w8:p1"],
 	]);
 

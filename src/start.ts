@@ -1,9 +1,8 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { getSupportedThinkingLevels, type Model } from "@earendil-works/pi-ai";
-import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { StartAgentError } from "../core/errors.js";
 import { herdrId } from "../core/herdr.js";
 import { AGENT_KINDS, oneOf, resolveCwd, validateStartRequest, type StartRequest } from "../core/request.js";
@@ -24,7 +23,6 @@ import { piChildArgv } from "../protocol/pi-child.js";
 import { piHerdrHost, resolveHerdrBinary } from "./herdr-cli.js";
 import type { SelectedProfile, StartResultDetails } from "./types.js";
 
-const DEFAULT_AGENT_DIR = join(homedir(), ".pi", "agent");
 // The repo root: the Claude Code plugin Claude children load, and the home of pi children's notifier.
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -52,8 +50,8 @@ function readModelConfig(path: string): Partial<ModelConfig> {
 	}
 }
 
-/** Children always run on the default profile, so its herdr-agents.json applies even under another orchestrator profile (pi-clawa). */
-export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir = DEFAULT_AGENT_DIR): ModelConfig {
+/** Children run on the orchestrator's profile (PI_CODING_AGENT_DIR), so its herdr-agents.json applies. */
+export function loadModelConfig(cwd: string, projectTrusted: boolean, agentDir = getAgentDir()): ModelConfig {
 	const paths = [join(agentDir, MODEL_CONFIG_FILE), ...(projectTrusted ? [join(cwd, CONFIG_DIR_NAME, MODEL_CONFIG_FILE)] : [])];
 	return mergeModelConfig(paths.map(readModelConfig));
 }
@@ -169,7 +167,7 @@ export async function startHerdrPiAgent(
 	} else {
 		profile = select(ctx, request.model, request.thinking);
 		const argv = piChildArgv({ name: request.name, model: profile.model, thinking: profile.thinking, parentPane, pluginRoot: PLUGIN_ROOT });
-		launch = { kind: "pi", argv, env: { PI_CODING_AGENT_DIR: DEFAULT_AGENT_DIR } };
+		launch = { kind: "pi", argv, env: { PI_CODING_AGENT_DIR: getAgentDir() } };
 	}
 	const started = await startInNewLocation(piHerdrHost(pi, resolveHerdrBinary()), request, cwd, launch, signal);
 
