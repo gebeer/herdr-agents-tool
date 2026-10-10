@@ -25,6 +25,8 @@ export default function childNotify(pi: ExtensionAPI): void {
 		active = false;
 		const message = last;
 		last = undefined;
+		// A notes-compaction rollover is not completion: the run in the new window reports.
+		if (message?.content.some((part) => part.type === "toolCall" && part.name === "new_context")) return;
 		const parent = herdrId(pi.getFlag("herdr-parent-pane"));
 		const pane = process.env.HERDR_PANE_ID;
 		if (process.env.HERDR_ENV !== "1" || !pane || ctx.mode !== "tui") return;
