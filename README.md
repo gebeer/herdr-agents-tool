@@ -1,5 +1,7 @@
 # Herdr Agents
 
+**Supported platform: Linux only.** Pi child cleanup requires GNU `tail` with `--pid` support and GNU `timeout`.
+
 Start Pi or Claude Code agents in new [Herdr](https://herdr.dev/docs/) panes, tabs, or workspaces.
 Receive their reports in the parent session.
 
