@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerRolloverRoster } from "./src/rollover-roster.js";
 import { registerHerdrStartAgentTool } from "./src/tool.js";
 
 /** Register only in an actual Herdr pane; reload naturally reevaluates this boundary. */
@@ -11,4 +12,5 @@ export default function herdrAgentsTool(pi: ExtensionAPI): void {
 		return;
 	}
 	registerHerdrStartAgentTool(pi);
+	registerRolloverRoster(pi);
 }
