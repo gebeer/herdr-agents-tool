@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -56,9 +55,9 @@ export default function herdrAgentsTool(pi: ExtensionAPI): void {
 				name: Type.String({ description: fields.name }),
 				prompt: Type.Optional(Type.String({ description: fields.prompt })),
 				model: Type.Optional(Type.String({ description: fields.model })),
-				kind: Type.Optional(StringEnum(KINDS, { description: fields.kind })),
-				thinking: Type.Optional(StringEnum(THINKING_LEVELS, { description: fields.thinking })),
-				place: Type.Optional(StringEnum(PLACES, { description: fields.place })),
+				kind: Type.Optional(Type.Enum(KINDS, { type: "string", description: fields.kind })),
+				thinking: Type.Optional(Type.Enum(THINKING_LEVELS, { type: "string", description: fields.thinking })),
+				place: Type.Optional(Type.Enum(PLACES, { type: "string", description: fields.place })),
 				focus: Type.Optional(Type.Boolean({ description: fields.focus })),
 				cwd: Type.Optional(Type.String({ description: fields.cwd })),
 			},
