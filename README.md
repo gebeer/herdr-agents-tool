@@ -65,7 +65,8 @@ Fields of the start tool. Only `name` is required.
 Pi models come from `enabledModels` in Pi's `settings.json` (`$PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
 The list is part of the tool's description, so the calling model sees it without a lookup, and it is read
 again on every start. `model: "sol"` picks the first enabled entry that contains `sol`;
-`"deepseek flash"` the first that contains both words. An unknown model fails with the list of valid ones.
+`"deepseek flash"` the first that contains both words. An unknown model fails with the list of valid ones. Patterns in `enabledModels` (`openai/*`, `sonnet`) are
+skipped: name such a model by its exact `provider/model-id`, which is always taken as given.
 
 ## How reports work
 

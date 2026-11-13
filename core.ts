@@ -77,11 +77,14 @@ export function startFields(piModels: readonly string[]) {
 	};
 }
 
-/** `enabledModels` of a Pi settings.json; empty when the file is missing or unreadable. */
+/**
+ * The model IDs in `enabledModels` of a Pi settings.json; empty when the file is missing or unreadable.
+ * Its patterns (`openai/*`, `sonnet`) are left out: `pi --model` takes an ID, and only Pi can expand them.
+ */
 export function piModelsFrom(settingsText: string | undefined): string[] {
 	try {
 		const models = JSON.parse(settingsText ?? "{}")?.enabledModels;
-		return Array.isArray(models) ? models.filter((model): model is string => typeof model === "string") : [];
+		return Array.isArray(models) ? models.filter((model): model is string => typeof model === "string" && /^[^\s/*?[]+\/[^\s*?[]+$/.test(model)) : [];
 	} catch {
 		return [];
 	}
@@ -91,8 +94,10 @@ export function piModelsFrom(settingsText: string | undefined): string[] {
 export function matchPiModel(wanted: string, piModels: readonly string[]): string | undefined {
 	const words = wanted.toLowerCase().split(/\s+/).filter(Boolean);
 	if (!words.length) return undefined;
-	return piModels.find((model) => model === wanted)
-		?? piModels.find((model) => words.every((word) => model.toLowerCase().includes(word)));
+	const exact = piModels.find((model) => model === wanted);
+	// A provider/model-id asks for that model: words must not turn it into a longer ID.
+	if (exact || wanted.includes("/")) return exact;
+	return piModels.find((model) => words.every((word) => model.toLowerCase().includes(word)));
 }
 
 /** Which agent to run and with which exact model. Throws with the valid choices when it cannot tell. */
@@ -107,6 +112,16 @@ export function resolveAgent(input: Pick<StartInput, "kind" | "model">, piModels
 	if (input.kind !== "claude" && piModel) return { kind: "pi", model: piModel };
 	if (input.kind === undefined && looksClaude) return { kind: "claude", model: claudeModel };
 	throw new Error(`unknown model "${wanted}". Pi models: ${piModels.join(", ") || "none enabled"} (or an exact provider/model-id). Claude models: ${CLAUDE_ALIASES.join(", ")} or a model ID.`);
+}
+
+/** The app learns of a new terminal a moment after hc starts it, so ask for up to 3 s. */
+async function showAgent(run: Run, address: string): Promise<boolean> {
+	for (let attempt = 0; attempt < 10; attempt++) {
+		const shown = await run(["herdr-app", "do", "agent.focus", "--terminal", address], HC_TIMEOUT_MS).catch(() => undefined);
+		if (shown?.exitCode === 0) return true;
+		await run(["sleep", "0.3"], HC_TIMEOUT_MS).catch(() => undefined);
+	}
+	return false;
 }
 
 /** What a child is told about its role, in its system prompt. */
@@ -185,10 +200,7 @@ export async function startAgent(host: Host, input: StartInput): Promise<string>
 	}
 	const started = await hc(host.run, "run", ["--bg", "--name", input.name, "--cwd", input.cwd ?? host.cwd, ...shown, "--", ...agent.argv]);
 	const address = String(started.address);
-	if (input.focus) {
-		const focused = await host.run(["herdr-app", "do", "agent.focus", "--terminal", address], HC_TIMEOUT_MS).catch(() => undefined);
-		if (focused?.exitCode !== 0) notes.push("It could not be shown: herdr-app did not answer.");
-	}
+	if (input.focus && !(await showAgent(host.run, address))) notes.push("It could not be shown: herdr-app did not answer.");
 	const profile = [agent.kind, agent.model, input.thinking].filter(Boolean).join(" ");
 	return [
 		`Started ${input.name} as ${address} (${profile}, ${place}).`,
