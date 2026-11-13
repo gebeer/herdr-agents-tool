@@ -1,16 +1,19 @@
 {
   "name": "herdr-agents-tool",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "One narrow Pi tool for starting a Pi agent in a newly created Herdr location.",
-  "keywords": ["pi-package", "herdr"],
+  "description": "Start Pi or Claude Code agents in herdr-core terminals and get their reports back.",
+  "keywords": [
+    "pi-package",
+    "herdr"
+  ],
   "scripts": {
-    "test": "bun run test/run.ts",
-    "test:integration": "bun run test/integration.ts",
+    "test": "node --test test/core.test.ts",
+    "test:e2e": "node --test test/e2e.test.ts",
     "typecheck": "tsc --noEmit",
-    "test:mod": "claude plugin test .",
-    "typecheck:mod": "tsc -p hooks"
+    "typecheck:mod": "tsc -p hooks",
+    "validate:mod": "claude plugin validate ."
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -22,6 +25,8 @@
     "typescript": "5.8.3"
   },
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
   }
 }
